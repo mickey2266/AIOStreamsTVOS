@@ -18,6 +18,9 @@ import PackageDescription
  *   video's mean rate is replaced (3 in a row, then the check rests 2
  *   minutes); `confirmsAtmosOnHeldSourceConnection`, so the Atmos
  *   confirmation runs on the held connection the app uses by default.
+ * - 47c4e653: the silent Atmos stream the engine plays beside a rendered
+ *   TrueHD Atmos or DTS:X bed stops while the picture-in-picture window
+ *   shows, as the bed played nothing in the window beside it.
  * Back to an upstream version once those are released there.
  *
  * TrueHD Atmos and DTS:X object rendering (`TrueHDObjectAudio`,
@@ -34,7 +37,7 @@ let package = Package(
         .library(name: "AetherHost", targets: ["AetherHost"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "a07c7c5c5c3990f51aee91eda2a6c03666a0afd1",
+        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "47c4e653f515ea7fad811fdab959a57e287de9f4",
                  traits: ["TrueHDObjectAudio", "DTSXObjectAudio"]),
     ],
     targets: [

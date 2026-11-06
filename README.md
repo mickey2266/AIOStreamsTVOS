@@ -24,7 +24,8 @@ lasts 7 days, with a paid developer account a year.
   installs to an Apple TV.
 - **By hand**: download `AIOStreams.ipa` from the latest
   [release](https://github.com/mickey2266/AIOStreamsTVOS/releases/latest), or the **Nightly**
-  prerelease for the newest build of `main`, and open it in your sideloading tool.
+  prerelease for the newest build of `main` or of a branch built by hand (its notes name which), and
+  open it in your sideloading tool.
 
 Then sign in to your Jellyfin server in the app, as in AIOStreams' web app. For Dolby Atmos, set
 the Apple TV's **Settings → Video and Audio → Audio Format** to **Auto**, and keep **Continuous
@@ -98,8 +99,11 @@ PCM and never Atmos.
   TrueHD Atmos or DTS:X track over another format in the same language. The statistics' Object
   audio line shows the bed and the objects playing. On the engine's software player (below) the
   same engine setting also hands an E-AC-3 Atmos track to tvOS's renderer compressed, which
-  played nothing when tried (de850fa), so that case may be silent with the switch on. Not yet
-  tried on a receiver.
+  played nothing when tried (de850fa), so that case may be silent with the switch on. In the
+  picture-in-picture window the silent Dolby Atmos stream the engine plays beside a rendered bed,
+  so a receiver shows Atmos (`AtmosOutputActivator`), stops: with it, the bed played nothing in the
+  window, with or without a display mode switch. Some receivers may show multichannel PCM rather
+  than Atmos for the window. Not yet tried on a receiver.
 - **What turns Atmos off**: the page's Audio channels set to Stereo or 5.1 (the engine decodes the
   sound to fit), and any output but HDMI, which alone carries Dolby MAT: Bluetooth gets a stereo
   mix, AirPods a spatial render. So does video the engine decodes itself (AV1, which no Apple TV
@@ -388,7 +392,7 @@ Back behaviour and the bundled-player path. It also means:
 
 | Siri Remote                         | Does                                              |
 | ----------------------------------- | ------------------------------------------------- |
-| Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe is one step)|
+| Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe is one step, and an edge the swipe starts or ends on adds no arrow of its own)|
 | Click                               | Enter (held, the page's hold actions)             |
 | Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
 | Click in a searchable list          | The pickers with up and down carets, such as Discover's catalog picker: picks the highlighted entry, including the one highlighted as the list opens or after a search; opens the keyboard only when nothing is left to pick |
@@ -414,7 +418,8 @@ to the page; the page saves where you stopped.
 ## Building
 
 The GitHub Actions workflow builds an unsigned `AIOStreams.ipa` for Apple TV hardware. Every run
-attaches it as an artifact, each push to `main` replaces the **Nightly** release, and a `v*` tag
+attaches it as an artifact, each push to `main` and each run started by hand (Actions → Build →
+Run workflow, on any branch) replaces the **Nightly** release, and a `v*` tag
 publishes a release of its own. Sign it with your own Apple ID using a sideloading tool that
 handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid account a year.
 
