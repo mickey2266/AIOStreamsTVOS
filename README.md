@@ -177,9 +177,10 @@ When a video freezes or falls behind its sound, the same report has the playback
 buffer held ahead (and its lowest in the last 30 s), stalls, dropped frames, the rate the video
 plays at against what the source delivered, and producer restarts. A buffer that runs dry with
 the source below the video's rate is the network; a full buffer with frames dropping is the
-picture falling behind. The menu's **Hold one source connection** reads the source over one
-connection instead of ranged requests (AetherEngine's `heldSourceConnection`, HTTP/1.1 only),
-from the next video.
+picture falling behind. The source is read over one held connection by default (AetherEngine's
+`heldSourceConnection`, HTTP/1.1 only), rather than ranged requests that start again at least
+every 32 MB, every few seconds of a remux. The menu's **Use ranged source requests** switches back,
+from the next video, and **Hold one source connection** returns to the default.
 
 The menu's **Play a test video…** plays an http(s) link you type (a file or an HLS playlist; the
 last one is remembered) in the page's own player, with its controls, track menus, statistics and
@@ -374,18 +375,21 @@ Back behaviour and the bundled-player path. It also means:
   engine setting isn't Automatic, does nothing.
 - **Cache size** (Settings → Playback → Player) sizes the engine's buffer: with a size picked, it
   buffers ahead until the cache holds that much, at least about 40 seconds and at most a quarter of
-  the free space, and keeps what played in the same space for seeking back. Automatic keeps the
-  engine's own (about 40 seconds ahead). It applies from the next video, and only to video AVPlayer
-  plays: the engine's software player keeps a fixed 96 MB ahead and 128 MB behind in memory.
+  the free space, and keeps what played in the same space for seeking back. Automatic buffers 10
+  minutes ahead (about 6 GB of an 80 Mbit/s remux), or as much as a quarter of the free space holds
+  if that's less, so a remux rides out a slow stretch of the source; the picked sizes, 1000 MB at
+  most, hold less. It applies from the next video, and only to video AVPlayer plays: the engine's
+  software player keeps a fixed 96 MB ahead and 128 MB behind in memory.
 
 ## The remote
 
 | Siri Remote                         | Does                                              |
 | ----------------------------------- | ------------------------------------------------- |
-| Clickpad edges / swipe              | Arrow keys (held edges repeat)                    |
+| Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe is one step)|
 | Click                               | Enter (held, the page's hold actions)             |
 | Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
-| Click in a searchable list          | Such as Discover's catalog picker: after moving through it with Up or Down, picks the highlighted entry; straight away, opens the keyboard to search |
+| Click in a searchable list          | The pickers with up and down carets, such as Discover's catalog picker: picks the highlighted entry, including the one highlighted as the list opens or after a search; opens the keyboard only when nothing is left to pick |
+| Up from a searchable list's top entry | Opens the keyboard to search (a held Up, or a quick run of presses, stops at the top instead) |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
 | **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), play a test video from a link, reload, switch the source connection, turn the Dolby primer on or off, or reset the app's data |

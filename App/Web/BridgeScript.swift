@@ -271,7 +271,10 @@ enum BridgeScript {
     platform: 'android',
     tv: true,
     voice: false,
-    gamepads: false,
+    // The page then listens for `gamepad` messages instead of polling the Gamepad API every frame,
+    // as it otherwise does on a host without this. None are sent: tvOS hands a controller's d-pad
+    // and buttons to AppWindow as presses, like the remote's, and those reach the page as keys.
+    gamepadButtons: true,
     // The page hides its player while the picture-in-picture window shows; the app's button in the
     // player starts the window (PictureInPicture.swift).
     pip: true,
@@ -311,25 +314,54 @@ enum BridgeScript {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   };
   let editing = null;
-  let swallowed = false;
+  /** The key that opened the keyboard, whose release the page never saw pressed. */
+  let swallowed = null;
   /*
-   * A searchable list, such as Discover's catalog picker: its search field
-   * keeps focus while Up and Down move a highlight through the list
-   * (aria-activedescendant, or cmdk's highlighted item), and Enter picks the
-   * highlighted entry. Once the list has been moved through, Enter there
-   * goes to the page to pick; straight away, it opens the keyboard to search.
+   * A searchable list, such as the pickers with the up and down carets (the
+   * page's Combobox, on cmdk): its search field keeps focus while Up and Down
+   * move a highlight through the list (aria-activedescendant, or cmdk's
+   * highlighted item). Enter picks whatever is highlighted, as cmdk highlights
+   * the first entry as the list opens and the first match after a search, so
+   * Enter on it straight away is a pick too. The keyboard opens with Up from
+   * the top entry, onto the search field above the list, or with Enter when
+   * nothing is highlighted (a search that matched nothing).
    */
-  let movedIn = null;
   const listField = (el) =>
     !!el &&
     (el.hasAttribute('aria-activedescendant') ||
       el.hasAttribute('cmdk-input') ||
       el.getAttribute('role') === 'combobox');
-  const highlighted = (el) => {
+  const isHighlighted = (item) =>
+    !!item &&
+    (item.getAttribute('data-selected') === 'true' || item.getAttribute('aria-selected') === 'true');
+  /** The list's entries a highlight can land on, first to last. */
+  const entries = (el) => {
+    const root = el.closest('[cmdk-root]');
+    if (root)
+      return [...root.querySelectorAll('[cmdk-item]')].filter(
+        (item) => item.getAttribute('aria-disabled') !== 'true' && item.getAttribute('data-disabled') !== 'true'
+      );
+    const id = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+    const list = id && document.getElementById(id);
+    return list
+      ? [...list.querySelectorAll('[role=option]')].filter((item) => item.getAttribute('aria-disabled') !== 'true')
+      : [];
+  };
+  const highlightedEntry = (el) => {
     const id = el.getAttribute('aria-activedescendant');
-    if (id && document.getElementById(id)) return true;
-    const list = el.closest('[cmdk-root]');
-    return !!list?.querySelector('[cmdk-item][data-selected=true], [cmdk-item][aria-selected=true]');
+    const active = id && document.getElementById(id);
+    if (active) return active;
+    return entries(el).find(isHighlighted) || null;
+  };
+  /**
+   * Up from here leaves the list for its search field: the top entry is highlighted, or the open
+   * list has nothing to highlight. A closed list field keeps Up for moving on.
+   */
+  const atTop = (el) => {
+    const all = entries(el);
+    if (!all.length) return el.getAttribute('aria-expanded') === 'true';
+    const current = highlightedEntry(el);
+    return !current || current === all[0];
   };
 
   const key = (type, name, repeat) =>
@@ -347,14 +379,19 @@ enum BridgeScript {
     value: Object.freeze({
       down(name, repeat) {
         const el = target();
-        if (name === 'ArrowUp' || name === 'ArrowDown') movedIn = listField(el) ? el : null;
-        else if (name !== 'Enter') movedIn = null;
-        const picks = name === 'Enter' && movedIn === el && listField(el) && highlighted(el);
-        // tvOS has no keyboard for a web page, so the app shows its own.
-        if (name === 'Enter' && isTextField(el) && !picks) {
+        const list = isTextField(el) && listField(el);
+        // tvOS has no keyboard for a web page, so the app shows its own: Enter in a text field,
+        // except on a list's highlighted entry, which it picks; Up from a list's top entry. A
+        // held Up, or presses as quick as its repeats, stays in the list, so running up through
+        // it stops at the top rather than opening the keyboard there.
+        const quick = !!repeat || performance.now() - lastDown < 150;
+        const opens = list
+          ? (name === 'Enter' && !highlightedEntry(el)) || (name === 'ArrowUp' && !quick && atTop(el))
+          : name === 'Enter' && isTextField(el);
+        if (opens) {
           if (repeat) return;
           editing = el;
-          swallowed = true;
+          swallowed = name;
           send({
             type: 'tvos-keyboard',
             value: el.value || '',
@@ -378,14 +415,13 @@ enum BridgeScript {
         const now = performance.now();
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
-        if (picks) movedIn = null;
         key('keydown', name, repeat);
         // Moves that scroll by transforms alone fire no scroll event.
         soonSweep();
       },
       up(name) {
-        if (name === 'Enter' && swallowed) {
-          swallowed = false;
+        if (name === swallowed) {
+          swallowed = null;
           return;
         }
         key('keyup', name);
@@ -399,8 +435,8 @@ enum BridgeScript {
       done(submit) {
         const el = editing;
         editing = null;
-        // The Enter that opened the keyboard was let go over it, out of the page's sight.
-        swallowed = false;
+        // The key that opened the keyboard was let go over it, out of the page's sight.
+        swallowed = null;
         if (!el || !el.isConnected) return;
         el.dispatchEvent(new Event('change', { bubbles: true }));
         el.focus();

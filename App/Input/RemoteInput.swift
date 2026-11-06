@@ -2,7 +2,7 @@ import UIKit
 
 /**
  * The Siri Remote as the keys the web app reads from a TV's remote: the
- * clickpad's edges and swipes as arrows (held, they repeat), Select as Enter
+ * clickpad's edges as arrows (held, they repeat), a swipe as one arrow, Select as Enter
  * (the page's hold actions work on a held Enter), Play/Pause as
  * `MediaPlayPause`. Back goes through the bridge, as on Android. Held for a
  * second, Play/Pause opens the app's own menu instead. Follows the working
@@ -19,11 +19,13 @@ final class RemoteInput {
     private var menuHold: Timer?
     private var menuOpened = false
     private var swipeAnchor: CGPoint = .zero
+    /// The swipe under way has already stepped.
+    private var swipeStepped = false
 
     private static let menuHoldTime: TimeInterval = 1
     private static let repeatDelay: TimeInterval = 0.45
     private static let repeatEvery: TimeInterval = 0.11
-    /// How far a swipe on the touch surface goes for one step.
+    /// How far a swipe on the touch surface goes before it steps.
     private static let swipeStepX: CGFloat = 190
     private static let swipeStepY: CGFloat = 150
 
@@ -60,23 +62,30 @@ final class RemoteInput {
         }
     }
 
-    /// Swipes on the touch surface step like the arrows.
+    /**
+     * A swipe on the touch surface steps once, as one press of an arrow does, however far or fast
+     * it goes: the finger has to lift before the next swipe steps again.
+     */
     func touches(_ touches: Set<UITouch>) {
         guard let touch = touches.first else { return }
         let at = touch.location(in: nil)
         switch touch.phase {
         case .began:
             swipeAnchor = at
+            swipeStepped = false
         case .moved:
+            guard !swipeStepped else { return }
             let dx = at.x - swipeAnchor.x
             let dy = at.y - swipeAnchor.y
             if abs(dx) >= Self.swipeStepX, abs(dx) > abs(dy) {
+                swipeStepped = true
                 tap(dx > 0 ? "ArrowRight" : "ArrowLeft")
-                swipeAnchor = at
             } else if abs(dy) >= Self.swipeStepY, abs(dy) > abs(dx) {
+                swipeStepped = true
                 tap(dy > 0 ? "ArrowDown" : "ArrowUp")
-                swipeAnchor = at
             }
+        case .ended, .cancelled:
+            swipeStepped = false
         default:
             break
         }
