@@ -72,8 +72,9 @@ final class AetherPlayer {
      * One connection to the source, read as playback needs it, instead of
      * ranged requests that end when the read-ahead fills and open again as it
      * drains (`LoadOptions.heldSourceConnection`). HTTP/1.1 only. On by
-     * default: ranged requests start again at least every 32 MB, every few
-     * seconds of a remux, each waiting for the source's first byte. Set from
+     * default: ranged requests start again at least every 128 MB, every
+     * dozen seconds of a remux, each waiting for the source's first byte, and
+     * more often once the buffer is full and the read-ahead drains. Set from
      * the app menu, where a choice made before stays; a file opens with the
      * setting it finds, so it applies from the next video.
      */

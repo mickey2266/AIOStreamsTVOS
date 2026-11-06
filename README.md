@@ -179,7 +179,10 @@ plays at against what the source delivered, and producer restarts. A buffer that
 the source below the video's rate is the network; a full buffer with frames dropping is the
 picture falling behind. The source is read over one held connection by default (AetherEngine's
 `heldSourceConnection`, HTTP/1.1 only), rather than ranged requests that start again at least
-every 32 MB, every few seconds of a remux. The menu's **Use ranged source requests** switches back,
+every 128 MB, every dozen seconds of a remux. Either way, a connection that runs below the video's
+average rate for 8 seconds while the player waits on it is replaced by a new one (three in a row,
+then it rests two minutes), as debrid CDNs often slow one connection and serve a new one at full
+speed. The menu's **Use ranged source requests** switches back,
 from the next video, and **Hold one source connection** returns to the default.
 
 The menu's **Play a test video…** plays an http(s) link you type (a file or an HLS playlist; the
