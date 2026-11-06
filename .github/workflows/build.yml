@@ -1,6 +1,6 @@
 # Builds the app for Apple TV hardware, unsigned, and packs it as an .ipa.
 # Every run attaches it as an artifact; a push to main, or a run started by
-# hand on main, also replaces the rolling "nightly" release, and a v* tag
+# hand on any branch, also replaces the rolling "nightly" release, and a v* tag
 # publishes a release of its own.
 # The .ipa has to be signed with your own Apple ID before an Apple TV installs it.
 name: Build
@@ -96,9 +96,11 @@ jobs:
           path: AIOStreams.ipa
           if-no-files-found: error
 
-      # A push to main, or a run started by hand on main (whichever AIOStreams ref it built).
+      # A push to main, or any run started by hand, on whichever branch it was started on (and
+      # whichever AIOStreams ref it built). A tag run started by hand publishes its tagged release
+      # below instead.
       - name: Publish the nightly release
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/'))
         env:
           GH_TOKEN: ${{ github.token }}
           AIOSTREAMS_REF: ${{ inputs.aiostreams_ref || 'main' }}
@@ -106,7 +108,7 @@ jobs:
           gh release delete nightly --yes --cleanup-tag || true
           gh release create nightly AIOStreams.ipa \
             --title "Nightly" \
-            --notes "Unsigned build of ${GITHUB_SHA::8}, with the web app from AIOStreams ${AIOSTREAMS_REF}. Sign it with your own Apple ID to install." \
+            --notes "Unsigned build of ${GITHUB_SHA::8} from ${GITHUB_REF_NAME}, with the web app from AIOStreams ${AIOSTREAMS_REF}. Sign it with your own Apple ID to install." \
             --prerelease \
             --target "$GITHUB_SHA"
 
