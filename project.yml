@@ -88,5 +88,9 @@ targets:
         TARGETED_DEVICE_FAMILY: "3"
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
+        # Xcode links a tv-app-extension with -e _TVExtensionMain, which on tvOS 27.2
+        # exits (status 3) as tvOS launches it, before the content provider loads, so
+        # the Top Shelf stays empty. A TVTopShelfContentProvider runs from NSExtensionMain.
+        OTHER_LDFLAGS: "-e _NSExtensionMain"
     dependencies:
       - sdk: TVServices.framework
