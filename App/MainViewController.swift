@@ -272,6 +272,18 @@ final class MainViewController: UIViewController, RemoteReceiver {
         input.touches(touches)
     }
 
+    func ownsPress(_ press: UIPress) -> Bool {
+        input.owns(press)
+    }
+
+    /// Anything the app opens over the page (the search keyboard, the app menu, alerts) takes the
+    /// remote from it: a held arrow stops repeating into the page underneath first.
+    override func present(_ viewControllerToPresent: UIViewController, animated flag: Bool,
+                          completion: (() -> Void)? = nil) {
+        input.interrupt()
+        super.present(viewControllerToPresent, animated: flag, completion: completion)
+    }
+
     private func setUpInput() {
         input.keyDown = { [weak self] key, repeated in
             guard let self else { return }
@@ -578,6 +590,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
     func appWillResignActive() {
         storage.save()
         input.stopRepeating()
+        // Presses down now end out of the app's sight.
+        input.forgetPresses()
         pip?.appWillResignActive()
         // The picture-in-picture window keeps playing over the Home screen.
         if pip?.active != true { player?.change(Change(paused: true)) }
