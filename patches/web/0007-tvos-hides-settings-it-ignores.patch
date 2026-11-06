@@ -1,11 +1,11 @@
 diff --git a/packages/web/src/lib/hosts/shell/bridge.ts b/packages/web/src/lib/hosts/shell/bridge.ts
-index fc8ba7e4..d1d73c58 100644
+index 3e8002e5..884669b8 100644
 --- a/packages/web/src/lib/hosts/shell/bridge.ts
 +++ b/packages/web/src/lib/hosts/shell/bridge.ts
-@@ -190,6 +190,12 @@ interface ShellBridge {
-   pip?: boolean;
-   /** The app can draw its video small over the page, with `player-frame`. */
+@@ -194,6 +194,12 @@ interface ShellBridge {
    miniPlayer?: boolean;
+   /** The app sends a controller's buttons as `gamepad` messages. */
+   gamepadButtons?: boolean;
 +  /**
 +   * The Apple TV app (AIOStreamsTVOS), which says it is the Android app on a TV but plays with
 +   * AetherEngine: the settings for ExoPlayer and mpv, those tvOS decides itself, and the Android app
@@ -15,7 +15,7 @@ index fc8ba7e4..d1d73c58 100644
    /** The device's name. */
    device: string;
    /** The app's own id for this device, where it keeps one. */
-@@ -208,6 +214,9 @@ export function appBridge(): ShellBridge | undefined {
+@@ -212,6 +218,9 @@ export function appBridge(): ShellBridge | undefined {
    return window.aiostreamsApp;
  }
  

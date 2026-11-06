@@ -1,5 +1,5 @@
 diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/components/media-row.tsx
-index 77d106de..59b1a80b 100644
+index 83e4c6c7..0cc99bb1 100644
 --- a/packages/web/src/components/media-row.tsx
 +++ b/packages/web/src/components/media-row.tsx
 @@ -79,28 +79,29 @@ const WINDOWED = 40;
@@ -47,10 +47,10 @@ index 77d106de..59b1a80b 100644
    return {
      drawn: (i: number) => i >= range[0] && i < range[1],
      // Only the first cards fade in; later ones are drawn ahead of the view.
-@@ -408,7 +409,7 @@ export function MediaRow({
-   const [lines] = useSetting(settings.interface.posterLines);
-   const width = itemClass ?? ITEM_WIDTH[shape];
-   const items = React.Children.toArray(children);
+@@ -435,7 +436,7 @@ export function MediaRow({
+     () => React.Children.toArray(children),
+     [children]
+   );
 -  const { drawn, fades, onView } = useWindow(items.length, start, !!loading);
 +  const { drawn, fades, onView } = useWindow(items.length, start);
    // A finger scrolls a plain scroller on the compositor; Embla is for a mouse to drag.

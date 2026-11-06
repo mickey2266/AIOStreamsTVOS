@@ -22,7 +22,7 @@ index 44276cfd..6637d981 100644
        .catch(() => undefined);
    };
 diff --git a/packages/web/src/lib/queries.ts b/packages/web/src/lib/queries.ts
-index 5ffe1167..440b672a 100644
+index ab8b4099..8fec94ae 100644
 --- a/packages/web/src/lib/queries.ts
 +++ b/packages/web/src/lib/queries.ts
 @@ -31,6 +31,21 @@ import type {
@@ -46,8 +46,8 @@ index 5ffe1167..440b672a 100644
 +}
  
  /** Every key starts here, so a user switch or sign-out drops them all. */
- function useKey() {
-@@ -171,7 +186,7 @@ export function useItemPages(
+ export function useKey() {
+@@ -182,7 +197,7 @@ export function useItemPages(
        opts.recursive,
        pageSize,
      ],
