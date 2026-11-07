@@ -88,10 +88,10 @@ final class RemoteInput {
      * more; a full-length swipe on the clickpad measured 700 to 950 pt. Across: one poster at
      * `firstStepX`, then one more for each `strideX`, so the steps follow the swipe's length.
      */
-    /// Half as sensitive again: one row at 220 pt (was 110). Two rows at 800 pt rather than twice
-    /// the 550 before, as 1100 is past a full-length swipe and would never be reached.
+    /// One row at 220 pt. A swipe across the whole inner circle of the clickpad stays one row: a
+    /// second row needs 900 pt (was 800), near the longest full-length swipes measured (700 to 950).
     private static let firstStepY: CGFloat = 220
-    private static let secondStepY: CGFloat = 800
+    private static let secondStepY: CGFloat = 900
     /// Across, half as sensitive again (was 150 and 280): a full-length swipe of about 1000 pt
     /// moves two posters.
     private static let firstStepX: CGFloat = 300
