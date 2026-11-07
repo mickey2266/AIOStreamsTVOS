@@ -394,6 +394,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
                 self.keyboard = nil
                 // However it closed, the page has the whole screen again.
                 self.web?.frame = self.view.bounds
+                self.callTV("viewport(0)")
                 self.callTV("done(\(submit))")
                 self.web?.focusPage()
             }
@@ -402,7 +403,10 @@ final class MainViewController: UIViewController, RemoteReceiver {
         // back to the whole screen as the keyboard goes.
         keyboard.onResults = { [weak self] rect in
             guard let self, let web = self.web else { return }
-            web.frame = rect.map { self.view.convert($0, from: nil) } ?? self.view.bounds
+            let frame = rect.map { self.view.convert($0, from: nil) } ?? self.view.bounds
+            web.frame = frame
+            // At the full screen's scale, rather than the full screen's layout shrunk to fit.
+            self.callTV(rect == nil ? "viewport(0)" : "viewport(\(Int(frame.width.rounded())))")
         }
         self.keyboard = keyboard
         present(keyboard.controller, animated: true)
