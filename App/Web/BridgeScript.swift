@@ -143,8 +143,8 @@ enum BridgeScript {
   /*
    * The page keeps every card it has shown mounted, and WebKit keeps each
    * mounted <img>'s decoded picture, so a long scroll through a catalog
-   * fills WebKit's process until tvOS ends it ("ran out of memory"). Artwork
-   * far from the screen (`data-ui=artwork`: the poster and wide cards' pictures)
+   * fills WebKit's process until tvOS ends it ("ran out of memory"). A
+   * picture far from the screen (cards' artwork, backdrops, logos)
    * has its picture swapped for a blank one, which lets WebKit drop the
    * decoded copy, and gets it back as it nears the screen again, from
    * WebKit's cache. A swap React made since is left alone. Measured on
@@ -154,6 +154,12 @@ enum BridgeScript {
    * within one was still being decoded as a scroll reached it, which judders.
    * When tvOS warns of low memory, `trim` lets go of all but a little past
    * where pictures come back, so the next sweep doesn't restore them at once.
+   *
+   * Every picture is swept, not only the cards': a backdrop is the biggest
+   * one there is. A page the page keeps but doesn't draw (the home page under
+   * every other, or the whole page under the player) is inert and skipped by
+   * layout; its pictures are let go of wherever they sit, and come back when
+   * it's drawn again, as the inert attribute comes off.
    */
   const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const RELEASE_SCREENS = 3;
@@ -169,12 +175,23 @@ enum BridgeScript {
     if (!w || !h) return;
     // Every box is read before any picture changes, so the page is laid out once, not after each swap.
     const found = [];
-    for (const img of document.querySelectorAll('img[data-ui="artwork"]')) {
+    for (const img of document.images) {
       const src = img.getAttribute('src');
       if (!src) continue;
+      // The page's own inline pictures are left alone; the blank one only when the sweep put it there.
+      if (src === BLANK ? !released.has(img) : src.startsWith('data:')) continue;
+      const kept = !!img.closest('[inert]');
+      // Not read for its box: inside skipped content, that would lay the kept page out.
+      if (kept && img.checkVisibility && !img.checkVisibility()) {
+        found.push([img, src, Infinity]);
+        continue;
+      }
       const rect = img.getBoundingClientRect();
-      // Not laid out (a hidden page): left as it is.
-      if (!rect.width && !rect.height) continue;
+      if (!rect.width && !rect.height) {
+        // Not laid out: a kept page goes, anything else (a closed menu's) is left as it is.
+        if (kept) found.push([img, src, Infinity]);
+        continue;
+      }
       found.push([img, src, Math.max(away(rect, h, 'top', 'bottom'), away(rect, w, 'left', 'right'))]);
     }
     for (const [img, src, far] of found) {
@@ -218,6 +235,14 @@ enum BridgeScript {
   try {
     // Capture: the page and each row scroll in their own containers.
     document.addEventListener('scroll', soonSweep, { capture: true, passive: true });
+  } catch {}
+  try {
+    // A page kept out of sight, or drawn again: its pictures go, or come back.
+    new MutationObserver(() => soonSweep()).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['inert'],
+      subtree: true,
+    });
   } catch {}
 
   const listeners = new Set();
