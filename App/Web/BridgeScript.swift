@@ -383,8 +383,6 @@ enum BridgeScript {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   };
   let editing = null;
-  /** The page's own viewport, kept while the keyboard's space for results sets another. */
-  let pageViewport = null;
   /** The key that opened the keyboard, whose release the page never saw pressed. */
   let swallowed = null;
   /*
@@ -610,24 +608,6 @@ enum BridgeScript {
             if (form.requestSubmit) form.requestSubmit();
             else form.submit();
           }, 250);
-      },
-      /**
-       * The page laid out `width` points wide at its full-screen scale, while
-       * it sits in the keyboard's space for results; without a width, back to
-       * the page's own viewport. Without this, WebKit keeps the full screen's
-       * layout and shrinks it into the narrower space.
-       */
-      viewport(width) {
-        const meta = document.querySelector('meta[name="viewport"]');
-        if (!meta) return;
-        if (pageViewport === null) pageViewport = meta.getAttribute('content') || '';
-        meta.setAttribute(
-          'content',
-          width > 0
-            ? `width=${Math.round(width)}, initial-scale=1, minimum-scale=1, maximum-scale=1, viewport-fit=cover`
-            : pageViewport
-        );
-        soonSweep();
       },
       /** tvOS is short of memory: artwork beyond the screen and a little around it lets go of its picture. */
       trim() {

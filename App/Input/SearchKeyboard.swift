@@ -15,9 +15,6 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
     private var closed = false
     private let onChange: (String) -> Void
     private let onClose: (_ submit: Bool) -> Void
-    /// The space tvOS leaves for results, in screen coordinates, or nil once there's none.
-    var onResults: (CGRect?) -> Void = { _ in }
-    private var lastResults: CGRect??
 
     init(
         text: String,
@@ -52,11 +49,6 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         below.leave = { [weak container] in container?.dismiss(animated: true) }
         below.moved = { [weak container] in container?.view.setNeedsLayout() }
         container.disappeared = { [weak self] in self?.close() }
-        container.resultsChanged = { [weak self] rect in
-            guard let self, self.lastResults != .some(rect) else { return }
-            self.lastResults = .some(rect)
-            self.onResults(rect)
-        }
     }
 
     // MARK: UISearchResultsUpdating
@@ -93,8 +85,6 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
  */
 private final class Container: UISearchContainerViewController {
     var disappeared: () -> Void = {}
-    /// The results' space in screen coordinates, or nil when there's none to show the page in.
-    var resultsChanged: (CGRect?) -> Void = { _ in }
     private let backdrop = UIView()
     private let cutOut = CAShapeLayer()
 
@@ -115,14 +105,12 @@ private final class Container: UISearchContainerViewController {
         guard let below = searchController.searchResultsController?.view, below.window != nil,
               !below.isHidden, below.alpha > 0 else {
             backdrop.layer.mask = nil
-            resultsChanged(nil)
             return
         }
         let results = below.convert(below.bounds, to: view).intersection(view.bounds)
         // Nothing left to show the keyboard over: leave the screen covered.
         guard !results.isNull, !results.isEmpty, results != view.bounds else {
             backdrop.layer.mask = nil
-            resultsChanged(nil)
             return
         }
         let path = UIBezierPath(rect: view.bounds)
@@ -130,13 +118,6 @@ private final class Container: UISearchContainerViewController {
         cutOut.frame = view.bounds
         cutOut.path = path.cgPath
         backdrop.layer.mask = cutOut
-        // The page moves into that space, laid out at its size.
-        resultsChanged(view.convert(results, to: nil))
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        resultsChanged(nil)
     }
 
     override func viewDidDisappear(_ animated: Bool) {
