@@ -375,10 +375,55 @@ enum BridgeScript {
       })
     );
 
+  /*
+   * Left from a row's first poster opens the navigation on the left. The page
+   * moves focus into it only when nothing on its own side sits just beside
+   * focus, so near the top of the home page (the hero, Continue Watching,
+   * Next Up) Left from the first card often went nowhere. When Left from a
+   * card in a row leaves focus where it was, it goes to the navigation's
+   * current page, as the page enters it itself; Right from there comes back
+   * to the card. Not in a dialog, the player, a text field or a slider.
+   */
+  const NAV_SIDE = '[data-ui="tv-rail"], [data-ui="sidebar"], [data-ui="corner-menu"]';
+  const OWN_KEYS =
+    '[role=dialog], [role=alertdialog], [role=menu], [role=listbox], [role=slider], [role=combobox], ' +
+    'input, textarea, select, [contenteditable=""], [contenteditable=true], [data-ui="player-controls"]';
+  /** The card focus left for the navigation, which Right returns to. */
+  let leftFrom = null;
+  const shown = (el) => !!el && el.isConnected && el.getClientRects().length > 0;
+  const navEntry = () => {
+    const nav = [...document.querySelectorAll(NAV_SIDE)].find(shown);
+    if (!nav) return null;
+    const named = nav.dataset.navEnter && nav.querySelector(nav.dataset.navEnter);
+    if (shown(named)) return named;
+    const current = nav.querySelector('[aria-current="page"]');
+    if (shown(current)) return current;
+    return [...nav.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"])')].find(shown) || null;
+  };
+  const inRow = (el) =>
+    !!el &&
+    el !== document.body &&
+    !!el.closest('[data-nav-row], [data-nav-group]') &&
+    !el.closest(NAV_SIDE) &&
+    !el.closest(OWN_KEYS) &&
+    !document.querySelector('[role=dialog][data-state=open], [role=alertdialog][data-state=open]');
+  const focusNav = (to) => to.focus({ preventScroll: true, focusVisible: true });
+  document.addEventListener('focusin', () => {
+    if (leftFrom && !document.activeElement?.closest?.(NAV_SIDE)) leftFrom = null;
+  });
+
   Object.defineProperty(window, '__aioTV', {
     value: Object.freeze({
       down(name, repeat) {
         const el = target();
+        // Back to the card the navigation was opened from.
+        if (name === 'ArrowRight' && !repeat && leftFrom && el.closest?.(NAV_SIDE) && shown(leftFrom)) {
+          const card = leftFrom;
+          leftFrom = null;
+          swallowed = name;
+          focusNav(card);
+          return;
+        }
         const list = isTextField(el) && listField(el);
         // tvOS has no keyboard for a web page, so the app shows its own: Enter in a text field,
         // except on a list's highlighted entry, which it picks; Up from a list's top entry. A
@@ -416,6 +461,17 @@ enum BridgeScript {
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
         key('keydown', name, repeat);
+        // Left from a row's first card that the page left where it was: into the navigation.
+        if (name === 'ArrowLeft' && !repeat && inRow(el)) {
+          const pressed = now;
+          setTimeout(() => {
+            if (lastDown !== pressed || document.activeElement !== el) return;
+            const to = navEntry();
+            if (!to) return;
+            leftFrom = el;
+            focusNav(to);
+          }, 0);
+        }
         // Moves that scroll by transforms alone fire no scroll event.
         soonSweep();
       },
