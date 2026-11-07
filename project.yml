@@ -88,11 +88,13 @@ targets:
         TARGETED_DEVICE_FAMILY: "3"
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
-        # Off for now: linked with `-e _NSExtensionMain` (22afb4c), an update sent while the
-        # app sat in the top row failed with "Connection refused (os error 61)", and only then.
-        # Without it Xcode links the extension with -e _TVExtensionMain, as NuvioTVOS's is,
-        # which on tvOS 27.2 exited (status 3) as tvOS launched it, so the Top Shelf may be
-        # empty again. To put it back:
+        # Left on Xcode's own entry point, -e _TVExtensionMain, so an update installs wherever
+        # the app sits. On tvOS 27.2 the extension exits with status 3 as tvOS starts it, before
+        # the content provider loads, so the Top Shelf shows the static image, not Continue
+        # Watching and Next Up. Linked with -e _NSExtensionMain (22afb4c) it shows them, but an
+        # update sent while the app sat in the top row then failed with "Connection refused
+        # (os error 61)", and only then. Building and signing the extension as NuvioTVOS does
+        # (2183425, reverted) didn't bring the rows back. The rows for a working entry point:
         # OTHER_LDFLAGS: "-e _NSExtensionMain"
     dependencies:
       - sdk: TVServices.framework
