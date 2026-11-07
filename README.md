@@ -387,12 +387,18 @@ Back behaviour and the bundled-player path. It also means:
   if that's less, so a remux rides out a slow stretch of the source; the picked sizes, 1000 MB at
   most, hold less. It applies from the next video, and only to video AVPlayer plays: the engine's
   software player keeps a fixed 96 MB ahead and 128 MB behind in memory.
+- A file opens as NuvioTVOS opens one: the stream probe reads 15 MB and 10 seconds rather than the
+  engine's 50 MB and 60 seconds (a link ending in `.m3u8`, `.m3u`, `.ts` or `.mpd`, which may be
+  live, keeps the engine's), a Matroska file's attachments (its subtitle fonts, which libass here
+  doesn't use) aren't read, and the engine makes no background scrub stills, which the page doesn't
+  show, so they don't take a second request on the source.
 
 ## The remote
 
 | Siri Remote                         | Does                                              |
 | ----------------------------------- | ------------------------------------------------- |
-| Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe is one step, and an edge the swipe starts or ends on adds no arrow of its own)|
+| Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe steps once per stretch of it, so a long swipe moves several items and a quick flick still moves one; an edge the swipe starts or ends on adds no arrow of its own)|
+| Swipe over the video                | As NuvioTVOS's player: with the controls hidden or on the seek bar, a sideways swipe doesn't seek while the video plays (edge clicks skip, a held edge scrubs) and scrubs through the pictures while it's paused; up or down brings the controls back once, and the rest of that swipe goes nowhere |
 | Click                               | Enter (held, the page's hold actions)             |
 | Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
 | Click in a searchable list          | The pickers with up and down carets, such as Discover's catalog picker: picks the highlighted entry, including the one highlighted as the list opens or after a search; opens the keyboard only when nothing is left to pick |
