@@ -89,6 +89,23 @@ jobs:
           # AetherEngine's FFmpeg is dynamic frameworks in the app; without them nothing plays.
           ls "$app/Frameworks" | grep -q '^AetherLibavcodec.framework$' \
             || { echo "No AetherLibavcodec.framework in $app/Frameworks"; ls -la "$app/Frameworks" || true; exit 1; }
+          # The prebuilt FFmpeg frameworks' Info.plists say MinimumOSVersion 26.0, though their binaries are
+          # built for tvOS 16.0. tvOS checks every bundle's MinimumOSVersion as it installs, so the app wouldn't
+          # install on tvOS 18 to 25 ("AetherLibdav1d.framework/AetherLibdav1d"). They take the app's own minimum.
+          min="$(plist "$app" MinimumOSVersion)"
+          for framework in "$app"/Frameworks/*.framework; do
+            /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion $min" "$framework/Info.plist" 2>/dev/null \
+              || /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string $min" "$framework/Info.plist"
+          done
+          # No bundle in the app may ask for a newer tvOS than the app does.
+          newer() { awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, ".")
+            for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
+            exit 1 }'; }
+          for bundle in "$shelf" "$app"/Frameworks/*.framework; do
+            need="$(plist "$bundle" MinimumOSVersion)"
+            echo "$(basename "$bundle"): tvOS $need"
+            if newer "$need" "$min"; then echo "$(basename "$bundle") needs tvOS $need, newer than the app's $min"; exit 1; fi
+          done
           # An ad-hoc signature carrying the App Group the app and its Top Shelf share,
           # which sideloading tools read when they re-sign. Inside out: the frameworks
           # and the extension first, as a bundle can't be signed around unsigned code.
