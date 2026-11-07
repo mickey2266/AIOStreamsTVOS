@@ -413,6 +413,11 @@ Back behaviour and the bundled-player path. It also means:
   `infuse://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}`
   (`patches/web/0019-tvos-infuse-link-names-the-title.patch`). Infuse opens the `aiostreams://` link
   in `x-success` when it's done, and the page saves where it stopped.
+- **SenPlayer** and **VidHub** are players to pick there too, with links of the same kind
+  (`patches/web/0020-tvos-senplayer-and-vidhub.patch`):
+  `SenPlayer://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&sub={subtitles}&name={title}&position={position}`
+  and
+  `open-vidhub://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}`.
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.

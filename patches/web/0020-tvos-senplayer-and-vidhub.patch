@@ -1,0 +1,26 @@
+diff --git a/packages/web/src/lib/playback/player-choice.ts b/packages/web/src/lib/playback/player-choice.ts
+--- a/packages/web/src/lib/playback/player-choice.ts
++++ b/packages/web/src/lib/playback/player-choice.ts
+@@ -83,5 +83,22 @@ export const LINK_PLAYERS: readonly {
+     platforms: ['ios'],
+   },
++  // Two more players on an Apple TV that take an x-callback link (AIOStreamsTVOS).
++  {
++    id: 'senplayer',
++    // eslint-disable-next-line lingui/no-unlocalized-strings -- an app's name
++    name: 'SenPlayer',
++    template:
++      'SenPlayer://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&sub={subtitles}&name={title}&position={position}',
++    platforms: ['ios'],
++  },
++  {
++    id: 'vidhub',
++    // eslint-disable-next-line lingui/no-unlocalized-strings -- an app's name
++    name: 'VidHub',
++    template:
++      'open-vidhub://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}',
++    platforms: ['ios'],
++  },
+   {
+     id: 'iina',
+     name: 'IINA',
