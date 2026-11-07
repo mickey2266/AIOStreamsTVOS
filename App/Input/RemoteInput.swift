@@ -2,7 +2,8 @@ import UIKit
 
 /**
  * The Siri Remote as the keys the web app reads from a TV's remote: the
- * clickpad's edges as arrows (held, they repeat), a swipe as one arrow, Select as Enter
+ * clickpad's edges as arrows (held, they repeat), a swipe as arrows (up or down one row, or
+ * two for a long one; across, as many posters as its length), Select as Enter
  * (the page's hold actions work on a held Enter), Play/Pause as
  * `MediaPlayPause`. Back goes through the bridge, as on Android. Held for a
  * second, Play/Pause opens the app's own menu instead. Follows the working
@@ -21,8 +22,11 @@ final class RemoteInput {
     private var swipeAnchor: CGPoint = .zero
     /// The touch the anchor belongs to, so a touch whose start was missed anchors where it's first seen.
     private var swipeTouch: ObjectIdentifier?
-    /// The swipe under way has already stepped.
-    private var swipeStepped = false
+    /// The way the swipe under way runs, settled by its first step (true across, false up or
+    /// down), the sign of that way (1 right or down, -1 left or up), and the steps it has sent.
+    private var swipeAcross: Bool?
+    private var swipeSign: CGFloat = 1
+    private var swipeSteps = 0
     /*
      * tvOS reports a touch as coming down at a place of its own (the middle of the screen across,
      * x = 960 every time), not where the finger is, and its first move jumps to the finger: once
@@ -78,9 +82,18 @@ final class RemoteInput {
     private static let menuHoldTime: TimeInterval = 1
     private static let repeatDelay: TimeInterval = 0.45
     private static let repeatEvery: TimeInterval = 0.11
-    /// How far a swipe on the touch surface goes before it steps.
-    private static let swipeStepX: CGFloat = 190
-    private static let swipeStepY: CGFloat = 150
+    /*
+     * How far a swipe goes for each step, measured from its first move along the way it set off.
+     * Up and down: a short swipe moves one row (`firstStepY`), a long one two (`secondStepY`), no
+     * more; a full-length swipe on the clickpad measured 700 to 950 pt. Across: one poster at
+     * `firstStepX`, then one more for each `strideX`, so the steps follow the swipe's length.
+     */
+    private static let firstStepY: CGFloat = 110
+    private static let secondStepY: CGFloat = 550
+    private static let firstStepX: CGFloat = 100
+    private static let strideX: CGFloat = 140
+    /// At most this many steps from one sample, however far the finger jumped.
+    private static let maxStepsPerSample = 3
 
     /// Presses that began here and haven't ended, whose ends come here too (`owns`).
     private var down: Set<UIPress.PressType> = []
@@ -158,7 +171,7 @@ final class RemoteInput {
         }
         touchDown = false
         touchSwiping = false
-        swipeStepped = false
+        resetSteps()
         swipeTouch = nil
     }
 
@@ -310,8 +323,8 @@ final class RemoteInput {
     }
 
     /**
-     * A swipe on the touch surface steps once, as one press of an arrow does, however far or fast
-     * it goes: the finger has to lift before the next swipe steps again.
+     * A swipe on the touch surface steps as it goes, keeping to the way its first step went:
+     * up or down one row, or two for a long swipe; across, one poster per stretch of it.
      */
     func touches(_ touches: Set<UITouch>) {
         // Of the touches in the event, the one still on the surface, if any.
@@ -363,16 +376,35 @@ final class RemoteInput {
             let my = at.y - lastAt.y
             lastAt = at
             if !touchSwiping, max(abs(dx), abs(dy)) >= Self.swipeIntent { swipeStarted() }
-            guard !swipeStepped else { return }
-            if abs(dx) >= Self.swipeStepX, abs(dx) > abs(dy), mx * dx >= 0 {
-                swipeStepped = true
-                let key = dx > 0 ? "ArrowRight" : "ArrowLeft"
-                note("    sent \(key): swipe " + String(format: "(%.0f, %.0f pt)", dx, dy))
-                tap(key)
-            } else if abs(dy) >= Self.swipeStepY, abs(dy) > abs(dx), my * dy >= 0 {
-                swipeStepped = true
-                let key = dy > 0 ? "ArrowDown" : "ArrowUp"
-                note("    sent \(key): swipe " + String(format: "(%.0f, %.0f pt)", dx, dy))
+            if swipeAcross == nil {
+                // The first step settles the way, which the rest of the swipe keeps to.
+                if abs(dx) >= Self.firstStepX, abs(dx) > abs(dy), mx * dx >= 0 {
+                    swipeAcross = true
+                    swipeSign = dx > 0 ? 1 : -1
+                } else if abs(dy) >= Self.firstStepY, abs(dy) > abs(dx), my * dy >= 0 {
+                    swipeAcross = false
+                    swipeSign = dy > 0 ? 1 : -1
+                } else {
+                    return
+                }
+            }
+            guard let across = swipeAcross else { return }
+            // How far along its own way the swipe has gone; coming back sends nothing.
+            let along = (across ? dx : dy) * swipeSign
+            let due: Int
+            if across {
+                due = along < Self.firstStepX ? 0 : 1 + Int((along - Self.firstStepX) / Self.strideX)
+            } else {
+                due = along >= Self.secondStepY ? 2 : along >= Self.firstStepY ? 1 : 0
+            }
+            var sent = 0
+            while swipeSteps < due, sent < Self.maxStepsPerSample {
+                swipeSteps += 1
+                sent += 1
+                let key = across
+                    ? (swipeSign > 0 ? "ArrowRight" : "ArrowLeft")
+                    : (swipeSign > 0 ? "ArrowDown" : "ArrowUp")
+                note("    sent \(key): swipe step \(swipeSteps) " + String(format: "(%.0f, %.0f pt)", dx, dy))
                 tap(key)
             }
         case .ended, .cancelled:
@@ -380,7 +412,7 @@ final class RemoteInput {
                 + String(format: ", moved %.0f, %.0f pt", at.x - swipeAnchor.x, at.y - swipeAnchor.y))
             notedAt = nil
             if touchSwiping { swipeEndedAt = ProcessInfo.processInfo.systemUptime }
-            swipeStepped = false
+            resetSteps()
             touchDown = false
             touchSwiping = false
             swipeTouch = nil
@@ -395,9 +427,15 @@ final class RemoteInput {
         lastAt = at
         swipeTouch = id
         swipeAnchor = at
-        swipeStepped = false
+        resetSteps()
         touchDown = true
         touchSwiping = false
+    }
+
+    private func resetSteps() {
+        swipeAcross = nil
+        swipeSign = 1
+        swipeSteps = 0
     }
 
     func stopRepeating() {
