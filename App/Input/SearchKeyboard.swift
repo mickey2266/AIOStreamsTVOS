@@ -226,7 +226,7 @@ private final class KeyboardHost: UIViewController {
          */
         var far: CGPoint?
         var narrowest = CGFloat.infinity
-        let layout = container.view
+        let layout: UIView = container.view
         func look(_ view: UIView) {
             guard !view.isHidden, view.alpha > 0 else { return }
             if String(describing: type(of: view)).contains("Keyboard") {
