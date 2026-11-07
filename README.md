@@ -405,8 +405,8 @@ Back behaviour and the bundled-player path. It also means:
   (`patches/web/0016-tvos-home-rows-draw-between-scrolls.patch`), rather than all twenty at once in
   the middle of one.
 - A home row's name is a link to its whole catalog in Discover, which the page's remote navigation
-  skips. Up from any of the row's posters goes to it, Click opens the catalog, and Down goes back
-  to the posters; moving from row to row still passes the names by
+  skips. Here it's a stop of its own above the row's posters: Up from any of them goes to it, Down
+  into the row from above lands on it first, and Click opens the catalog
   (`patches/web/0018-tvos-row-titles-open-catalog.patch`).
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said

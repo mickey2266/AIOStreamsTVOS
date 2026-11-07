@@ -7,8 +7,8 @@ diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/compon
          <h2
            data-ui="media-row-title"
 -          data-nav="skip"
-+          // A link to the row's whole catalog in Discover, which Up from the
-+          // row's cards reaches (AIOStreamsTVOS).
++          // A link to the row's whole catalog in Discover, a stop of its own
++          // above the row's cards (AIOStreamsTVOS).
 +          data-nav="title"
            // Room inside the truncating box for a link's focus outline.
            className="-m-1 min-w-0 truncate p-1 text-lg font-semibold sm:text-xl"
@@ -16,45 +16,40 @@ diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/compon
 diff --git a/packages/web/src/lib/input/focus.ts b/packages/web/src/lib/input/focus.ts
 --- a/packages/web/src/lib/input/focus.ts
 +++ b/packages/web/src/lib/input/focus.ts
-@@ -126,3 +126,25 @@ const ruledOut = (el: HTMLElement) =>
+@@ -126,3 +126,32 @@ const ruledOut = (el: HTMLElement) =>
    ) || !!el.closest('[inert], [aria-hidden=true], [data-nav=skip]');
  
 +/**
-+ * A row's title (`data-nav=title`), a link to the row's whole catalog: Up
-+ * from any of the row's cards goes to it, Down from it comes back, and
-+ * moving from row to row passes it by (AIOStreamsTVOS).
++ * A row's title (`data-nav=title`), a link to the row's whole catalog, is a
++ * stop of its own above the row's cards: Up from any of the cards goes to it,
++ * as does Down into the row from above (AIOStreamsTVOS).
 + */
 +const inTitle = (el: Element) => !!el.closest('[data-nav=title]');
 +
-+/** Another row's title, which focus moving from row to row passes by. */
-+const otherTitle = (el: HTMLElement, from: HTMLElement) =>
-+  inTitle(el) && !el.closest(GROUP)?.contains(from);
-+
-+/** Up from a row's cards, its title, however far along the row focus is. */
-+function titleAbove(from: HTMLElement, dir: Direction): HTMLElement | null {
-+  if (dir !== 'up' || inTitle(from) || !from.closest('[data-nav-row]'))
-+    return null;
-+  const title = from
-+    .closest(GROUP)
++/** The link in a row's title, where focus can reach it. */
++function titleOf(group: Element | null | undefined): HTMLElement | null {
++  const title = group
 +    ?.querySelector('[data-nav=title]')
 +    ?.querySelector<HTMLElement>(FOCUSABLE);
 +  return title && canFocus(title) ? title : null;
 +}
 +
++/** Up from a row's cards, its title, however far along the row focus is. */
++function titleAbove(from: HTMLElement, dir: Direction): HTMLElement | null {
++  if (dir !== 'up' || inTitle(from) || !from.closest('[data-nav-row]'))
++    return null;
++  return titleOf(from.closest(GROUP));
++}
++
++/** Down into a row from outside it, its title first. */
++function titleBelow(to: HTMLElement, from: HTMLElement, dir: Direction) {
++  if (dir !== 'down') return null;
++  const group = to.closest(GROUP);
++  return group && !group.contains(from) ? titleOf(group) : null;
++}
++
  /** A focusable standing for its whole card (`data-nav-card`) is measured as its `data-nav-box`. */
-@@ -270,3 +292,4 @@ function candidates(
-   return all.filter((el) => {
-     if (ruledOut(el)) return false;
-+    if (otherTitle(el, from)) return false;
-     if (near.has(el)) return true;
-@@ -339,5 +362,5 @@ function nearest(
-   const els = everything
-     ? [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
--        (el) => !el.closest('[data-nav-out]')
-+        (el) => !el.closest('[data-nav-out]') && !otherTitle(el, from)
-       )
-     : candidates(root, from, rect, dir);
-@@ -636,6 +659,7 @@ function first(root: Element): HTMLElement | null {
+@@ -636,6 +665,7 @@ function first(root: Element): HTMLElement | null {
    const el =
      all(area).find(
 -      (el) => onScreen(el) && canFocus(el) && !el.closest('nav')
@@ -64,9 +59,17 @@ diff --git a/packages/web/src/lib/input/focus.ts b/packages/web/src/lib/input/fo
 -    all(area).find((el) => onScreen(el) && canFocus(el)) ??
 +    all(area).find((el) => onScreen(el) && canFocus(el) && !inTitle(el)) ??
      all(root).find((el) => canFocus(el));
-@@ -857,3 +881,4 @@ export function move(dir: Direction): boolean {
+@@ -857,3 +887,4 @@ export function move(dir: Direction): boolean {
    const within = exit && !out ? exit : root;
 -  let near = back && canFocus(back) ? back : null;
 +  // Up from a row's cards, its title, even where focus came down from the row above.
 +  let near = titleAbove(from, dir) ?? (back && canFocus(back) ? back : null);
    // A box entered at its named element, as tabs at the picked one, has more of it to pass on the way back.
+@@ -877,4 +908,6 @@ export function move(dir: Direction): boolean {
+     return true;
+   }
+-  moveTo(near === back ? near : entry(near, from), dir);
++  const to = near === back ? near : entry(near, from);
++  // Down into a row from outside it, its title before its cards.
++  moveTo(titleBelow(to, from, dir) ?? to, dir);
+   return true;
