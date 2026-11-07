@@ -531,6 +531,12 @@ final class MainViewController: UIViewController, RemoteReceiver {
             NSLog("[page] %@", message.text("message") ?? "")
         case "tvos-page-stats":
             MemoryLog.pageStats(message)
+        case "tvos-slide":
+            // How the page drew the slide after an Up or Down, in the remote log beside the key.
+            let n = { (name: String) in Int(message.number(name) ?? 0) }
+            input.notePage("\(message.text("key") ?? "?") slide: \(n("frames")) frames in \(n("ms")) ms, "
+                + "longest gap \(n("longest")) ms, \(n("slow")) slow; \(n("nodes")) elements added, "
+                + "\(n("images")) pictures loaded")
         default:
             // Downloads, keyboard completions and the like have no Apple TV part.
             break

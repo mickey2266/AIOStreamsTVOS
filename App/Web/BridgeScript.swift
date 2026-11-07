@@ -208,6 +208,62 @@ enum BridgeScript {
     document.addEventListener('scroll', soonSweep, { capture: true, passive: true });
   } catch {}
 
+  /*
+   * A single Up or Down slides the page on the compositor, so what makes one
+   * judder is what the page does meanwhile. For the app menu, each slide's
+   * frames as the page drew them over `SLIDE_WATCH`: how many, the longest gap
+   * between two, and how many gaps were long enough to show (two frames or
+   * more); with the elements added and the pictures loaded in the meantime.
+   */
+  const SLIDE_WATCH = 400;
+  let watchingSlide = false;
+  const watchSlide = (name) => {
+    if (watchingSlide) return;
+    watchingSlide = true;
+    const start = performance.now();
+    let last = start;
+    let frames = 0;
+    let longest = 0;
+    let slow = 0;
+    let nodes = 0;
+    let images = 0;
+    let observer = null;
+    try {
+      observer = new MutationObserver((list) => {
+        for (const change of list) nodes += change.addedNodes.length;
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    } catch {}
+    const loaded = (e) => {
+      if (e.target && e.target.tagName === 'IMG') images++;
+    };
+    document.addEventListener('load', loaded, true);
+    const tick = (time) => {
+      const gap = time - last;
+      last = time;
+      frames++;
+      if (frames > 1) {
+        longest = Math.max(longest, gap);
+        if (gap > 34) slow++;
+      }
+      if (time - start < SLIDE_WATCH) return requestAnimationFrame(tick);
+      observer?.disconnect();
+      document.removeEventListener('load', loaded, true);
+      watchingSlide = false;
+      send({
+        type: 'tvos-slide',
+        key: name,
+        ms: Math.round(time - start),
+        frames,
+        longest: Math.round(longest),
+        slow,
+        nodes,
+        images,
+      });
+    };
+    requestAnimationFrame(tick);
+  };
+
   const listeners = new Set();
   const send = (message) => handler.postMessage(JSON.stringify(message));
 
@@ -494,6 +550,7 @@ enum BridgeScript {
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
         key('keydown', name, repeat);
+        if (!repeat && (name === 'ArrowUp' || name === 'ArrowDown')) watchSlide(name);
         // Left from a row's first card that the page left where it was: into the navigation.
         if (name === 'ArrowLeft' && !repeat && inRow(el)) {
           const pressed = now;
