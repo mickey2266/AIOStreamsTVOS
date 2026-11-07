@@ -229,6 +229,34 @@ private final class KeyboardHost: UIViewController {
         }
     }
 
+    /**
+     * The keys' extent in `layout`, from the focus system: the focused key and the focus items
+     * around it, all the keys of one plane once a container holds a dozen or more of them. Nil
+     * while focus isn't on a key in the layout.
+     */
+    private func focusedKeys(in layout: UIView) -> CGRect? {
+        guard let focused = UIFocusSystem.focusSystem(for: layout)?.focusedItem else { return nil }
+        // Only a key of the keyboard in this box, found through the nearest view above it.
+        var holder: UIFocusEnvironment? = focused
+        while let each = holder, !(each is UIView) { holder = each.parentFocusEnvironment }
+        guard let view = holder as? UIView, view.isDescendant(of: layout) else { return nil }
+        var environment: UIFocusEnvironment? = focused.parentFocusEnvironment
+        while let each = environment {
+            if let container = each.focusItemContainer {
+                let space = container.coordinateSpace
+                let items = container.focusItems(in: space.bounds)
+                if items.count >= 12 {
+                    let union = items.reduce(CGRect.null) { all, item in
+                        all.union(space.convert(item.frame, to: layout))
+                    }
+                    return union.isNull || union.isEmpty ? nil : union
+                }
+            }
+            environment = each.parentFocusEnvironment
+        }
+        return nil
+    }
+
     /// Which keyboard tvOS drew, and the box moved when it isn't the one placed for.
     private func detect() {
         guard let window = view.window, presentingViewController != nil else { return }
@@ -261,6 +289,8 @@ private final class KeyboardHost: UIViewController {
         let windows = window.windowScene?.windows ?? [window]
         for each in windows { look(each) }
         guard let found else { return }
+        // The keys' own frames, where tvOS gives them: its keyboard views draw them inset by a margin.
+        if found, let fromFocus = focusedKeys(in: layout) { measuredKeys = fromFocus }
         var changed = found != grid
         if found, let measuredKeys, measuredKeys.width > 0, measuredKeys.maxY > 0 {
             let rounded = CGRect(x: measuredKeys.minX.rounded(.down), y: 0,
