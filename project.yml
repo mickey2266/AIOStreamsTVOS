@@ -88,6 +88,9 @@ targets:
         TARGETED_DEVICE_FAMILY: "3"
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
+        # As NuvioTVOS's Top Shelf target, which runs on Xcode's own entry point.
+        SKIP_INSTALL: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
         # Off for now: linked with `-e _NSExtensionMain` (22afb4c), an update sent while the
         # app sat in the top row failed with "Connection refused (os error 61)", and only then.
         # Without it Xcode links the extension with -e _TVExtensionMain, as NuvioTVOS's is,
