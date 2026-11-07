@@ -237,22 +237,6 @@ final class AetherPlayer {
             // cap; 1 TiB rather than Int.max, so nothing the engine adds to it can overflow.
             options.sessionCacheByteBudget = 1 << 40
         }
-        // As NuvioTVOS opens a remote file (its #68): the engine's 50 MB / 60 s stream probe reads over
-        // the network to the end for sparse streams (cover art, PGS), several seconds of the start of a
-        // remux. 15 MB / 10 s still finds the video and audio. A live stream keeps the engine's probe,
-        // as Nuvio's does: its sparse streams can take longer to show.
-        if Self.isOnDemand(request.url) {
-            options.probesize = Self.probeBytes
-            options.maxAnalyzeDuration = Self.probeMicroseconds
-        }
-        // A Matroska file's attachments (its ASS fonts, tens of MB on anime releases) are read whole
-        // as it opens, before the first packet. libass here draws with the system's fonts
-        // (`AssRenderer`), never the file's, so they'd be read for nothing. Tracks are unchanged.
-        options.skipsContainerAttachments = true
-        // The engine's background scrub stills are a side reader on the source. The page's seek-bar
-        // pictures come from the app's own extractor (`Thumbnails`), so nothing reads these; Nuvio
-        // also turns them off when it has its pictures from elsewhere.
-        options.generatesBackgroundScrubPreviews = false
         options.heldSourceConnection = Self.heldSourceConnection
         openedHeld = options.heldSourceConnection
         // ASS and SSA cues come as their event lines, for libass (`SubtitleOverlay`); other formats are unaffected.
@@ -268,17 +252,6 @@ final class AetherPlayer {
     private static let cacheWindowSegments = 2700
     /// Automatic's forward window: 10 minutes of the engine's 4 s segments.
     private static let automaticWindowSegments = 150
-
-    /// The stream probe for a file on demand, NuvioTVOS's: 15 MiB and 10 s.
-    private static let probeBytes: Int64 = 15 * 1024 * 1024
-    private static let probeMicroseconds: Int64 = 10 * 1_000_000
-    /// Playlists and transport streams may be live; anything else (a file's link) is on demand.
-    private static let maybeLiveExtensions: Set<String> = ["m3u8", "m3u", "ts", "mpd"]
-
-    private static func isOnDemand(_ url: String) -> Bool {
-        guard let path = URL(string: url)?.path.lowercased() else { return false }
-        return !maybeLiveExtensions.contains((path as NSString).pathExtension)
-    }
 
     /// The page's channel limit, dialogue boost and night mode. Shaping needs the decoded sound, so any of them
     /// costs passthrough and Atmos; 7.1 and Automatic with no boost and night mode off shape nothing.

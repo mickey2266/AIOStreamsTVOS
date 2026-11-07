@@ -302,12 +302,6 @@ final class MainViewController: UIViewController, RemoteReceiver {
             guard let self else { return }
             self.callTV("up(\(self.jsString(key)))")
         }
-        // A swipe's steps go through the bridge's `swipe`, which keeps the player's (as NuvioTVOS's
-        // player does) and passes the rest on as arrows.
-        input.swipeStep = { [weak self] key, stroke in
-            guard let self else { return }
-            self.callTV("swipe(\(self.jsString(key)),\(stroke))")
-        }
         input.back = { [weak self] in
             guard let self else { return }
             if self.connected { self.sendToPage(["type": "back"]) } else { self.leaveApp() }

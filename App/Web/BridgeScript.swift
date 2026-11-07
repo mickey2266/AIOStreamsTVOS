@@ -364,39 +364,6 @@ enum BridgeScript {
     return !current || current === all[0];
   };
 
-  /*
-   * A swipe on the touch surface over the player, as NuvioTVOS's player reads
-   * one. With the controls hidden (the page hides them by taking focus away),
-   * or on the seek bar, a sideways swipe doesn't seek while the video plays:
-   * clicks on the clickpad's edges skip, and holding one scrubs. Paused, it
-   * scrubs through the pictures, as the page's paused arrows do. An up or
-   * down swipe with the controls hidden brings them back once, and the rest
-   * of that swipe goes nowhere, so it doesn't run on through the buttons.
-   * Anywhere else, and once the controls have focus, a swipe moves focus as
-   * arrows do. `stroke` names the finger's swipe.
-   */
-  let spentStroke = null;
-  const swipeHeld = (name, stroke) => {
-    if (stroke === spentStroke) return true;
-    const controls = document.querySelector('[data-ui=player-controls]:not([data-loading])');
-    if (!controls) return false;
-    const el = document.activeElement;
-    const bare = !el || el === document.body || el === document.documentElement;
-    const onSeekBar = !!el && el.matches?.('[data-ui=seek-bar]') && controls.contains(el);
-    if (!bare && !onSeekBar) return false;
-    const sideways = name === 'ArrowLeft' || name === 'ArrowRight';
-    if (sideways) {
-      if (controls.hasAttribute('data-paused')) return false;
-      spentStroke = stroke;
-      return true;
-    }
-    // The seek bar's own Up and Down move to the buttons, as they would.
-    if (onSeekBar) return false;
-    // This step brings the controls back; the rest of the swipe goes nowhere.
-    spentStroke = stroke;
-    return false;
-  };
-
   const key = (type, name, repeat) =>
     target().dispatchEvent(
       new KeyboardEvent(type, {
@@ -458,12 +425,6 @@ enum BridgeScript {
           return;
         }
         key('keyup', name);
-      },
-      /** One step of a touch-surface swipe: an arrow, unless the player keeps it (`swipeHeld`). */
-      swipe(name, stroke) {
-        if (swipeHeld(name, stroke)) return;
-        this.down(name, false);
-        this.up(name);
       },
       /** Each change on the app's search keyboard, into the field it was opened for. */
       input(value) {
