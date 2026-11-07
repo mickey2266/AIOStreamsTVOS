@@ -23,6 +23,17 @@ final class RemoteInput {
     private var swipeTouch: ObjectIdentifier?
     /// The swipe under way has already stepped.
     private var swipeStepped = false
+    /*
+     * tvOS reports a touch as coming down at a place of its own (the middle of the screen across,
+     * x = 960 every time), not where the finger is, and its first move jumps to the finger: once
+     * 187 pt down while the finger went up, which stepped Down before the swipe Up began. So a
+     * swipe is measured from its first move, and the down point counts for nothing.
+     */
+    private var anchored = false
+    /// Where the touch came down as tvOS reported it, to tell a press measured from it.
+    private var downAt: CGPoint?
+    /// The previous sample, so a step only goes the way the finger is moving.
+    private var lastAt: CGPoint = .zero
     /// A finger is on the touch surface, and whether it has moved far enough to be a swipe.
     private var touchDown = false
     private var touchSwiping = false
@@ -318,6 +329,7 @@ final class RemoteInput {
             note("touch down at \(Self.point(at))")
             notedAt = at
             startTouch(id, at)
+            downAt = at
         case .moved, .stationary:
             // A touch whose start wasn't seen is measured from where it's first seen, not from
             // where the last swipe began, which could read as the opposite direction.
@@ -325,6 +337,20 @@ final class RemoteInput {
                 note("touch first seen at \(Self.point(at)) (its start was missed)")
                 notedAt = at
                 startTouch(id, at)
+                // A move is where the finger really is, so it anchors the swipe.
+                anchored = true
+                lastAt = at
+            }
+            if !anchored {
+                // The first move: where the finger really is. The swipe starts here.
+                note("  first move at \(Self.point(at)), measured from here")
+                anchored = true
+                swipeAnchor = at
+                lastAt = at
+                notedAt = at
+                // An arrow pressed as the touch came down was measured from tvOS's down point.
+                if let held = pending, let downAt, held.from == downAt { pending = (held.type, held.key, at) }
+                return
             }
             if let last = notedAt, max(abs(at.x - last.x), abs(at.y - last.y)) >= Self.noteEvery {
                 note("  finger at \(Self.point(at))")
@@ -332,14 +358,18 @@ final class RemoteInput {
             }
             let dx = at.x - swipeAnchor.x
             let dy = at.y - swipeAnchor.y
+            // How this sample moved: a step goes only the way the finger is going now.
+            let mx = at.x - lastAt.x
+            let my = at.y - lastAt.y
+            lastAt = at
             if !touchSwiping, max(abs(dx), abs(dy)) >= Self.swipeIntent { swipeStarted() }
             guard !swipeStepped else { return }
-            if abs(dx) >= Self.swipeStepX, abs(dx) > abs(dy) {
+            if abs(dx) >= Self.swipeStepX, abs(dx) > abs(dy), mx * dx >= 0 {
                 swipeStepped = true
                 let key = dx > 0 ? "ArrowRight" : "ArrowLeft"
                 note("    sent \(key): swipe " + String(format: "(%.0f, %.0f pt)", dx, dy))
                 tap(key)
-            } else if abs(dy) >= Self.swipeStepY, abs(dy) > abs(dx) {
+            } else if abs(dy) >= Self.swipeStepY, abs(dy) > abs(dx), my * dy >= 0 {
                 swipeStepped = true
                 let key = dy > 0 ? "ArrowDown" : "ArrowUp"
                 note("    sent \(key): swipe " + String(format: "(%.0f, %.0f pt)", dx, dy))
@@ -360,6 +390,9 @@ final class RemoteInput {
     }
 
     private func startTouch(_ id: ObjectIdentifier, _ at: CGPoint) {
+        anchored = false
+        downAt = nil
+        lastAt = at
         swipeTouch = id
         swipeAnchor = at
         swipeStepped = false
