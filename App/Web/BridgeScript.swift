@@ -12,12 +12,24 @@ import Foundation
  */
 enum BridgeScript {
     /// `storage` is the app's copy of localStorage by origin, as JSON.
-    static func make(version: String, device: String, deviceId: String, storage: String) -> String {
+    static func make(version: String, device: String, deviceId: String, storage: String, pageScrolls: Bool) -> String {
         template
             .replacingOccurrences(of: "__VERSION__", with: literal(version))
             .replacingOccurrences(of: "__DEVICE__", with: literal(device))
             .replacingOccurrences(of: "__DEVICE_ID__", with: literal(deviceId))
             .replacingOccurrences(of: "__STORAGE__", with: storage)
+            .replacingOccurrences(of: "__PAGE_SCROLLS__", with: pageScrolls ? "true" : "false")
+    }
+
+    /**
+     * How a keyed move up or down the page slides. Off (the page's own way), the page jumps and its
+     * whole content, a layer the page's height, is eased back over the jump on the compositor. On,
+     * the page's scroll position itself is eased there frame by frame, as rows are. Chosen in the
+     * app menu, to tell which slides smoothly here; it takes effect as the page loads again.
+     */
+    static var pageScrolls: Bool {
+        get { UserDefaults.standard.bool(forKey: "web.pageScrolls") }
+        set { UserDefaults.standard.set(newValue, forKey: "web.pageScrolls") }
     }
 
     private static func literal(_ text: String) -> String {
@@ -71,6 +83,17 @@ enum BridgeScript {
    * jumps, single presses too (tried while chasing the page's memory kills).
    */
   const SLIDES = true;
+  /*
+   * The app menu's page slide switch (`BridgeScript.pageScrolls`). With it on,
+   * the page's glide code finds no layer to ease a box's content in
+   * (patches/web/0014), so a keyed move up or down eases the scroll position
+   * itself instead: the page's and the home rows' box alike. Rows across keep
+   * their eased layers.
+   */
+  const PAGE_SCROLLS = __PAGE_SCROLLS__;
+  try {
+    Object.defineProperty(window, '__aioTVScrolls', { value: PAGE_SCROLLS });
+  } catch {}
   /*
    * Test: no masks or filters. The kills come within a second or two of an
    * item page opening with its version picker (`?pick=`), which draws its
@@ -550,7 +573,11 @@ enum BridgeScript {
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
         key('keydown', name, repeat);
-        if (!repeat && (name === 'ArrowUp' || name === 'ArrowDown')) watchSlide(name);
+        if (name === 'ArrowUp' || name === 'ArrowDown') {
+          if (!repeat) watchSlide(name);
+          // A scrolled slide runs no animation to wait for, so the artwork sweep is told how long it runs.
+          if (PAGE_SCROLLS) slidingUntil = Math.max(slidingUntil, performance.now() + 300);
+        }
         // Left from a row's first card that the page left where it was: into the navigation.
         if (name === 'ArrowLeft' && !repeat && inRow(el)) {
           const pressed = now;

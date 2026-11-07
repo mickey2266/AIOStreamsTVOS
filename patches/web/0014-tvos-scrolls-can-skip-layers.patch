@@ -1,0 +1,13 @@
+diff --git a/packages/web/src/lib/input/glide.ts b/packages/web/src/lib/input/glide.ts
+--- a/packages/web/src/lib/input/glide.ts
++++ b/packages/web/src/lib/input/glide.ts
+@@ -120,6 +120,9 @@ function drawnShift(outer: HTMLElement): [number, number] {
+ }
+ 
+ function layerOf(box: Element): HTMLElement | null {
++  // The Apple TV app's page slide switch: no layer, so a keyed move up or
++  // down eases the scroll position itself (AIOStreamsTVOS).
++  if ((window as { __aioTVScrolls?: boolean }).__aioTVScrolls) return null;
+   if (box === document.documentElement)
+     return document.querySelector<HTMLElement>('[data-glide-layer=page]');
+   for (const child of box.children)

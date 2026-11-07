@@ -145,7 +145,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
             version: "\(Identity.version)-tvos",
             device: Identity.device,
             deviceId: Identity.deviceId,
-            storage: storage.json
+            storage: storage.json,
+            pageScrolls: BridgeScript.pageScrolls
         ))
         let ours = url.flatMap { $0.scheme?.lowercased() == WebApp.scheme ? $0 : nil }
         // `loadURL:` in Objective-C; Swift names it `load(_:)`.
@@ -333,9 +334,19 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines += TopShelf.report
         let held = AetherPlayer.heldSourceConnection
         let priming = AudioOutput.primerEnabled
+        let scrolls = BridgeScript.pageScrolls
         let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
             AppMenu.Action(title: "Play a test video…", destructive: false) { [weak self] in self?.askTestVideo() },
             AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
+            AppMenu.Action(
+                title: scrolls ? "Slide the page as one layer" : "Slide the page by scrolling", destructive: false
+            ) { [weak self] in
+                BridgeScript.pageScrolls = !scrolls
+                self?.loadPage()
+                self?.flashStatus(scrolls
+                    ? "The page slides up and down as one layer, as it did"
+                    : "The page slides up and down by scrolling")
+            },
             AppMenu.Action(title: held ? "Use ranged source requests" : "Hold one source connection", destructive: false) {
                 [weak self] in
                 AetherPlayer.heldSourceConnection = !held
