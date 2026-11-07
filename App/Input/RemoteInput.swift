@@ -37,11 +37,28 @@ final class RemoteInput {
      * finger turns it into a swipe in that time, or it comes during a swipe or just after one, the
      * swipe alone counts. A click with the finger at rest still steps and repeats as before.
      */
-    private var pending: (type: UIPress.PressType, key: String)?
+    /*
+     * Time alone didn't tell them apart: a swipe down from the top edge lifts off the edge, which
+     * ends its Up, before it has moved far enough to count as a swipe, and an Up that ended before
+     * it settled was taken for a quick click. Every swipe down then went up a row and down again,
+     * and focus stayed between two rows. A click barely moves the finger, and an edge touch that
+     * becomes a swipe always does, so an arrow whose finger moved more than `pressSlop` from where
+     * it was when the press began is the swipe's, however it ends. The press is held back the same
+     * way when its touch hasn't been seen yet, as the two can come in either order.
+     */
+    private var pending: (type: UIPress.PressType, key: String, from: CGPoint?)?
     private var pendingTimer: Timer?
     /// Arrow presses dropped as part of a swipe, whose ends are dropped too.
     private var dropped: Set<UIPress.PressType> = []
     private static let pressSettle: TimeInterval = 0.12
+    /// How far the finger may move during a click: a click shifts it a few points, a swipe more.
+    private static let pressSlop: CGFloat = 20
+    /// A finger that has moved less than this between two looks is at rest.
+    private static let stillSlop: CGFloat = 6
+    /// How many `pressSettle` looks a moving finger may take before its arrow counts (0.48 s).
+    private static let maxSettleLooks = 4
+    /// Where the finger on the surface was last seen.
+    private var touchAt: CGPoint = .zero
     /// Movement past which a finger on the surface is a swipe, well short of a step.
     private static let swipeIntent: CGFloat = 40
     /// How long after a swipe's finger lifts an arrow press still counts as part of it.
@@ -120,7 +137,7 @@ final class RemoteInput {
                 }
                 // A dropped press whose end never came mustn't swallow this one's.
                 dropped.remove(press.type)
-                if arrow, touchDown {
+                if arrow {
                     holdPending(press.type, key)
                     return
                 }
@@ -129,8 +146,10 @@ final class RemoteInput {
             } else {
                 if dropped.remove(press.type) != nil { return }
                 if let held = pending, held.type == press.type {
-                    // Let go before it settled: a quick click, which steps once.
                     clearPending()
+                    // The finger slid off the edge: the start of a swipe, not a click.
+                    if fingerMoved(since: held.from) { return }
+                    // Let go before it settled: a quick click, which steps once.
                     tap(key)
                     return
                 }
@@ -147,13 +166,52 @@ final class RemoteInput {
 
     private func holdPending(_ type: UIPress.PressType, _ key: String) {
         clearPending()
-        pending = (type, key)
+        pending = (type, key, touchDown ? touchAt : nil)
+        settleLater(checkedAt: touchDown ? touchAt : nil)
+    }
+
+    /*
+     * A thumb resting low on the clickpad holds Down, and a sideways swipe it starts slowly hasn't
+     * gone far in `pressSettle`: Down fired, then the swipe's Left, so focus went down a row
+     * instead of left into the rail. A held arrow settles only once the finger has kept still for
+     * a `pressSettle` (moved under `stillSlop` since the last look): while it moves, the arrow
+     * waits, and it's dropped once the finger has gone `pressSlop` from where the press began.
+     * After `maxSettleLooks` looks, a finger still inside `pressSlop` is taken as resting, so a
+     * trembling thumb still holds and repeats.
+     */
+    private func settleLater(checkedAt: CGPoint?, looks: Int = 1) {
+        pendingTimer?.invalidate()
         pendingTimer = Timer.scheduledTimer(withTimeInterval: Self.pressSettle, repeats: false) { [weak self] _ in
             guard let self, let held = self.pending else { return }
+            if self.fingerMoved(since: held.from) {
+                self.clearPending()
+                self.dropped.insert(held.type)
+                return
+            }
+            if self.touchDown, looks < Self.maxSettleLooks, let from = checkedAt ?? held.from {
+                // The press came before its touch, which has shown since (no look from there yet),
+                // or the finger is on its way somewhere: a swipe, or a click that ends where it is.
+                if checkedAt == nil || self.fingerTravel(since: from) > Self.stillSlop {
+                    self.settleLater(checkedAt: self.touchAt, looks: looks + 1)
+                    return
+                }
+            }
             self.clearPending()
             self.keyDown(held.key, false)
             self.startRepeating(held.key)
         }
+    }
+
+    /// The finger on the surface has moved further than a click moves it since `from`.
+    private func fingerMoved(since from: CGPoint?) -> Bool {
+        fingerTravel(since: from) > Self.pressSlop
+    }
+
+    /// How far the finger has gone from `from`, measured to where it was last seen, so a press
+    /// whose end comes just after the finger lifts still knows the finger slid.
+    private func fingerTravel(since from: CGPoint?) -> CGFloat {
+        guard let from else { return 0 }
+        return max(abs(touchAt.x - from.x), abs(touchAt.y - from.y))
     }
 
     private func clearPending() {
@@ -169,6 +227,9 @@ final class RemoteInput {
             clearPending()
             dropped.insert(held.type)
         }
+        // An arrow that settled before the finger set off keeps its one step, but doesn't repeat
+        // against the swipe.
+        if let key = repeating, key.hasPrefix("Arrow") { stopRepeating() }
     }
 
     /**
@@ -181,6 +242,11 @@ final class RemoteInput {
         else { return }
         let at = touch.location(in: nil)
         let id = ObjectIdentifier(touch)
+        if touch.phase != .ended, touch.phase != .cancelled {
+            touchAt = at
+            // The press came before its touch: it's measured from where the finger first shows.
+            if let held = pending, held.from == nil { pending = (held.type, held.key, at) }
+        }
         switch touch.phase {
         case .began:
             startTouch(id, at)
