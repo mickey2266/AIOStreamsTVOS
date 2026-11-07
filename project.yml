@@ -88,9 +88,11 @@ targets:
         TARGETED_DEVICE_FAMILY: "3"
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
-        # Xcode links a tv-app-extension with -e _TVExtensionMain, which on tvOS 27.2
-        # exits (status 3) as tvOS launches it, before the content provider loads, so
-        # the Top Shelf stays empty. A TVTopShelfContentProvider runs from NSExtensionMain.
-        OTHER_LDFLAGS: "-e _NSExtensionMain"
+        # Off for now: linked with `-e _NSExtensionMain` (22afb4c), an update sent while the
+        # app sat in the top row failed with "Connection refused (os error 61)", and only then.
+        # Without it Xcode links the extension with -e _TVExtensionMain, as NuvioTVOS's is,
+        # which on tvOS 27.2 exited (status 3) as tvOS launched it, so the Top Shelf may be
+        # empty again. To put it back:
+        # OTHER_LDFLAGS: "-e _NSExtensionMain"
     dependencies:
       - sdk: TVServices.framework
