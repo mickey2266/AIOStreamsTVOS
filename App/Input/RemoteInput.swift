@@ -90,8 +90,10 @@ final class RemoteInput {
      */
     private static let firstStepY: CGFloat = 110
     private static let secondStepY: CGFloat = 550
-    private static let firstStepX: CGFloat = 100
-    private static let strideX: CGFloat = 140
+    /// Across, about half as often as at first (100 and 140 pt), which ran far too fast: a
+    /// full-length swipe of about 1000 pt moves four posters.
+    private static let firstStepX: CGFloat = 150
+    private static let strideX: CGFloat = 280
     /// At most this many steps from one sample, however far the finger jumped.
     private static let maxStepsPerSample = 3
 
