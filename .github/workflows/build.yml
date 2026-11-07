@@ -63,8 +63,7 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS=""
+            CODE_SIGN_IDENTITY=""
 
       - name: Pack the .ipa
         run: |
@@ -81,16 +80,10 @@ jobs:
           for framework in "$app"/Frameworks/*; do
             codesign --force --sign - --timestamp=none "$framework"
           done
-          # The extension and the app as NuvioTVOS's build-ipa.sh signs them, whose Top Shelf
-          # runs on Xcode's own entry point: each bundle's executable alone, with only the App
-          # Group, rather than the whole bundle.
-          for bundle in "$shelf" "$app"; do
-            executable=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$bundle/Info.plist")
-            entitlements=App/AIOStreamsTV.entitlements
-            [ "$bundle" = "$shelf" ] && entitlements=TopShelf/TopShelf.entitlements
-            codesign --force --sign - --timestamp=none --entitlements "$entitlements" "$bundle/$executable"
-            codesign -d --entitlements - "$bundle/$executable"
-          done
+          codesign --force --sign - --timestamp=none --entitlements TopShelf/TopShelf.entitlements "$shelf"
+          codesign --force --sign - --timestamp=none --entitlements App/AIOStreamsTV.entitlements "$app"
+          codesign -d --entitlements - "$app"
+          codesign -d --entitlements - "$shelf"
           rm -rf Payload AIOStreams.ipa
           mkdir Payload
           cp -R "$app" Payload/
