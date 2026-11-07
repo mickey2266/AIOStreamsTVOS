@@ -6,9 +6,10 @@ which SideStore and the Apple TV sideloaders that read the same format
 
     python3 scripts/update-source.py <tag> <path to .ipa>
 
-The version and build come from project.yml (MARKETING_VERSION and
-CURRENT_PROJECT_VERSION, which the .ipa's Info.plist is built from), the
-size and the date from the .ipa and today. The new version goes first, as
+The version comes from project.yml (MARKETING_VERSION), the build from
+BUILD_NUMBER, the run number the workflow builds the .ipa's CFBundleVersion
+from (CURRENT_PROJECT_VERSION in project.yml when it isn't set), the size
+and the date from the .ipa and today. The new version goes first, as
 the clients take the first one as the latest; one already listed for the
 same version is replaced, so a rebuilt tag doesn't list twice.
 """
@@ -41,7 +42,7 @@ def main():
         sys.exit(f"tag {tag} doesn't match MARKETING_VERSION {version} in project.yml")
     entry = {
         "version": version,
-        "buildVersion": project_setting("CURRENT_PROJECT_VERSION"),
+        "buildVersion": os.environ.get("BUILD_NUMBER") or project_setting("CURRENT_PROJECT_VERSION"),
         "date": datetime.date.today().isoformat(),
         "localizedDescription": f"AIOStreams for Apple TV {version}. Release notes: "
         f"https://github.com/{REPO}/releases/tag/{tag}",

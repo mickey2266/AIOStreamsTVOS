@@ -21,6 +21,7 @@ settings:
     DEVELOPMENT_TEAM: ""
     # Shared by the app and its Top Shelf extension, which have to match.
     MARKETING_VERSION: "1.0.0"
+    # A local build's. CI builds give the workflow's run number instead, so each is newer than the last.
     CURRENT_PROJECT_VERSION: "1"
 targets:
   AIOStreamsTV:
@@ -88,13 +89,14 @@ targets:
         TARGETED_DEVICE_FAMILY: "3"
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
-        # Left on Xcode's own entry point, -e _TVExtensionMain, so an update installs wherever
-        # the app sits. On tvOS 27.2 the extension exits with status 3 as tvOS starts it, before
-        # the content provider loads, so the Top Shelf shows the static image, not Continue
-        # Watching and Next Up. Linked with -e _NSExtensionMain (22afb4c) it shows them, but an
-        # update sent while the app sat in the top row then failed with "Connection refused
-        # (os error 61)", and only then. Building and signing the extension as NuvioTVOS does
-        # (2183425, reverted) didn't bring the rows back. The rows for a working entry point:
-        # OTHER_LDFLAGS: "-e _NSExtensionMain"
+        # Linked with -e _NSExtensionMain: on Xcode's own entry point, -e _TVExtensionMain, the
+        # extension exits with status 3 on tvOS 27.2 as tvOS starts it, before the content
+        # provider loads, so the Top Shelf shows the static image, not Continue Watching and
+        # Next Up. With this one (22afb4c) it shows them, but an update sent while the app sat
+        # in the top row failed with "Connection refused (os error 61)", and only then. Every
+        # build had CFBundleVersion 1 then; CI now gives each its run number, to see whether an
+        # update that is a newer build installs. If it still fails there, take this line out
+        # for updates that install wherever the app sits, and the static image.
+        OTHER_LDFLAGS: "-e _NSExtensionMain"
     dependencies:
       - sdk: TVServices.framework

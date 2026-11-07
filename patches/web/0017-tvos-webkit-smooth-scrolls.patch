@@ -1,0 +1,127 @@
+diff --git a/packages/web/src/lib/input/glide.ts b/packages/web/src/lib/input/glide.ts
+index 6acd8680..5cb2c019 100644
+--- a/packages/web/src/lib/input/glide.ts
++++ b/packages/web/src/lib/input/glide.ts
+@@ -205,13 +205,20 @@ export function glideTo(box: Element, left: number, top: number): void {
+     left === box.scrollLeft ? left : clampX(box, left),
+     Math.max(0, Math.min(top, box.scrollHeight - box.clientHeight)),
+   ];
+-  if (!glides.has(box) && to[0] === box.scrollLeft && to[1] === box.scrollTop)
++  if (
++    !glides.has(box) &&
++    !natives.has(box) &&
++    to[0] === box.scrollLeft &&
++    to[1] === box.scrollTop
++  )
+     return;
+   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+     glides.delete(box);
++    endNative(box);
+     box.scrollTo(...to);
+     return;
+   }
++  if (nativeScrolls()) return scrollNatively(box, to);
+   const layer = to[0] === box.scrollLeft ? layerOf(box) : null;
+   if (layer && !pinned(box, layer, to[1] - box.scrollTop))
+     return easeJump(box, layer, to[1]);
+@@ -240,6 +247,65 @@ export function glideTo(box: Element, left: number, top: number): void {
+   frame ||= requestAnimationFrame(step);
+ }
+ 
++/**
++ * The Apple TV app's switch for WebKit's own smooth scroll (AIOStreamsTVOS).
++ * Eased here, a scroll is set from the page's thread every frame, so any long
++ * task there stalls it; WebKit's runs where the page's work can't hold it up.
++ */
++const nativeScrolls = () =>
++  !!(window as { __aioTVNativeScrolls?: boolean }).__aioTVNativeScrolls;
++
++/** How long a smooth scroll counts as under way at most, when it never reaches its place. */
++const NATIVE_MOST_MS = 1000;
++
++interface Native {
++  to: [number, number];
++  frame: number;
++  timer: ReturnType<typeof setTimeout>;
++}
++
++/** Smooth scrolls WebKit runs, by box, and where each is headed. */
++const natives = new Map<Element, Native>();
++
++function scrollNatively(box: Element, to: [number, number]): void {
++  glides.delete(box);
++  // Taken over rather than ended, so what waits for the page to be still keeps waiting.
++  const was = natives.get(box);
++  if (was) {
++    cancelAnimationFrame(was.frame);
++    clearTimeout(was.timer);
++  }
++  const native: Native = {
++    to,
++    frame: 0,
++    timer: setTimeout(() => endNative(box, native), NATIVE_MOST_MS),
++  };
++  natives.set(box, native);
++  box.scrollTo({ left: to[0], top: to[1], behavior: 'smooth' });
++  // Over once it's there; a read of the scroll position a frame lays nothing out.
++  const check = () => {
++    if (natives.get(box) !== native) return;
++    if (
++      Math.abs(box.scrollLeft - to[0]) < 1 &&
++      Math.abs(box.scrollTop - to[1]) < 1
++    )
++      return endNative(box, native);
++    native.frame = requestAnimationFrame(check);
++  };
++  native.frame = requestAnimationFrame(check);
++}
++
++/** Ends `box`'s smooth scroll, only `native` when given, so a later one carries on. */
++function endNative(box: Element, native = natives.get(box)): void {
++  if (!native || natives.get(box) !== native) return;
++  natives.delete(box);
++  cancelAnimationFrame(native.frame);
++  clearTimeout(native.timer);
++  wakeStill();
++}
++
++const scrolling = () => glides.size > 0 || natives.size > 0;
++
+ /**
+  * The longest work waits for scrolls to end: a held key keeps one running,
+  * and what waits must still come in time (AIOStreamsTVOS).
+@@ -261,8 +327,8 @@ export function whenStill(run: () => void): () => void {
+     clearTimeout(timer);
+     run();
+   };
+-  const timer = setTimeout(go, glides.size ? STILL_MOST_MS : 0);
+-  if (glides.size) stillWaiting.add(go);
++  const timer = setTimeout(go, scrolling() ? STILL_MOST_MS : 0);
++  if (scrolling()) stillWaiting.add(go);
+   return () => {
+     done = true;
+     stillWaiting.delete(go);
+@@ -272,7 +338,7 @@ export function whenStill(run: () => void): () => void {
+ 
+ /** After the frame the last scroll ended in, so it's drawn first. */
+ function wakeStill(): void {
+-  if (!stillWaiting.size) return;
++  if (!stillWaiting.size || scrolling()) return;
+   const waiting = [...stillWaiting];
+   stillWaiting.clear();
+   setTimeout(() => waiting.forEach((go) => go()));
+@@ -280,11 +346,12 @@ function wakeStill(): void {
+ 
+ /** Where `box` ends up once a scroll under way finishes. */
+ export const headedTo = (box: Element): [number, number] =>
+-  glides.get(box)?.to ?? [box.scrollLeft, box.scrollTop];
++  glides.get(box)?.to ??
++  natives.get(box)?.to ?? [box.scrollLeft, box.scrollTop];
+ 
+ /** How far `box`'s content still moves on screen before scrolls and jumps under way end. */
+ export function drift(box: Element): [number, number] {
+-  const glide = glides.get(box);
++  const glide = glides.get(box) ?? natives.get(box);
+   const offset = glideOffset(box);
+   if (!glide) return [0, -offset];
+   return [box.scrollLeft - glide.to[0], box.scrollTop - glide.to[1] - offset];

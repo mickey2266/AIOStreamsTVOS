@@ -84,6 +84,19 @@ enum BridgeScript {
     Object.defineProperty(window, '__aioTVScrolls', { value: PAGE_SCROLLS });
   } catch {}
   /*
+   * Test: those keyed scrolls up and down are WebKit's own smooth scroll
+   * (`scrollTo` with `behavior: 'smooth'`, patches/web/0017) rather than the
+   * page's, which sets the scroll position from the page's thread each frame:
+   * any long task there, such as a row's cards mounting, stalls the scroll.
+   * WebKit's runs where the page's work can't hold it up, but starts again
+   * from a standstill at each press, which a held key's repeats may show.
+   * Set it to false for the page's own easing again.
+   */
+  const NATIVE_SCROLLS = true;
+  try {
+    Object.defineProperty(window, '__aioTVNativeScrolls', { value: PAGE_SCROLLS && NATIVE_SCROLLS });
+  } catch {}
+  /*
    * Test: no masks or filters. The kills come within a second or two of an
    * item page opening with its version picker (`?pick=`), which draws its
    * backdrop under two nested `mask-image`s, or, without one, a poster under
@@ -111,9 +124,21 @@ enum BridgeScript {
         '.animate-pulse,.UI-Skeleton__root{animation:none!important}'
       );
     else if (!SLIDES) rules.push('[data-glide-layer]{will-change:auto!important}');
+    /*
+     * The page's "Blur episodes you haven't started" setting marks the page
+     * `data-blur-spoilers` and blurs those episodes' pictures and text with
+     * `filter`, so while it's on, the pictures and text it blurs keep their
+     * filters. A blurred episode card is small, and a remote's focus on one
+     * takes its blur off.
+     */
+    const SPOILERS =
+      "[data-ui='artwork'],[data-ui='episode-title']>span,p[data-ui='episode-title']," +
+      "[data-ui='episode-synopsis'],[data-ui='wide-card-subtitle']";
     if (!EFFECTS)
       rules.push(
-        '*,*::before,*::after{filter:none!important;-webkit-backdrop-filter:none!important;' +
+        'html:not([data-blur-spoilers]) *,html[data-blur-spoilers] *:not(' + SPOILERS + '),' +
+          '*::before,*::after{filter:none!important}',
+        '*,*::before,*::after{-webkit-backdrop-filter:none!important;' +
           'backdrop-filter:none!important;-webkit-mask-image:none!important;mask-image:none!important}'
       );
     if (rules.length) {
@@ -175,21 +200,28 @@ enum BridgeScript {
     if (!w || !h) return;
     // Every box is read before any picture changes, so the page is laid out once, not after each swap.
     const found = [];
+    // The few inert boxes are looked at once, rather than every picture looking up through its ancestors.
+    const hidden = new Set();
+    for (const box of document.querySelectorAll('[inert]')) {
+      // A kept page is `invisible` and skips its content; a closed panel is inert but drawn.
+      const style = getComputedStyle(box);
+      if (style.visibility !== 'hidden' && style.contentVisibility !== 'hidden') continue;
+      for (const img of box.getElementsByTagName('img')) hidden.add(img);
+    }
     for (const img of document.images) {
       const src = img.getAttribute('src');
       if (!src) continue;
       // The page's own inline pictures are left alone; the blank one only when the sweep put it there.
       if (src === BLANK ? !released.has(img) : src.startsWith('data:')) continue;
-      const kept = !!img.closest('[inert]');
       // Not read for its box: inside skipped content, that would lay the kept page out.
-      if (kept && img.checkVisibility && !img.checkVisibility()) {
+      if (hidden.has(img)) {
         found.push([img, src, Infinity]);
         continue;
       }
       const rect = img.getBoundingClientRect();
       if (!rect.width && !rect.height) {
         // Not laid out: a kept page goes, anything else (a closed menu's) is left as it is.
-        if (kept) found.push([img, src, Infinity]);
+        if (img.closest('[inert]')) found.push([img, src, Infinity]);
         continue;
       }
       found.push([img, src, Math.max(away(rect, h, 'top', 'bottom'), away(rect, w, 'left', 'right'))]);
