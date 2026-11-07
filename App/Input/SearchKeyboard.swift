@@ -100,14 +100,17 @@ private final class KeyboardHost: UIViewController {
      * 640 is the first guess until a keyboard has been measured; the measure is remembered.
      */
     private static let gridFirstWidth: CGFloat = 640
-    private static let gridMinWidth: CGFloat = 520
+    private static let gridMinWidth: CGFloat = 360
     private static let gridMaxWidth: CGFloat = 960
     private static let gridLayoutWidth: CGFloat = 840
     private static let gridHeight: CGFloat = 860
-    private static let gridMargin: CGFloat = 40
-    private static let gridRightInset: CGFloat = 60
+    /// Room around the keys, on each side.
+    private static let gridMargin: CGFloat = 32
+    /// tvOS's own margin from the screen's edge, inside which a TV shows all of the picture.
+    private static let gridRightInset: CGFloat = 90
     private static let gridKey = "keyboard.gridLayout"
-    private static let gridWidthKey = "keyboard.gridWidth"
+    private static let gridLeftKey = "keyboard.gridLeft"
+    private static let gridWidthKey = "keyboard.gridKeysWidth"
     private static let gridHeightKey = "keyboard.gridHeight"
 
     private static var rememberedGrid: Bool {
@@ -115,20 +118,28 @@ private final class KeyboardHost: UIViewController {
         set { UserDefaults.standard.set(newValue, forKey: gridKey) }
     }
 
-    /// The keyboard's measured size in the box, as its far edges in the layout.
-    private static var rememberedSize: CGSize? {
+    /**
+     * Where the keys sit in the layout, as measured: from their left edge across their width, and
+     * down to their bottom. tvOS lays them out some way in from the layout's left, which the box
+     * leaves out by moving the layout left by as much.
+     */
+    private static var rememberedKeys: CGRect? {
         get {
-            let width = UserDefaults.standard.double(forKey: gridWidthKey)
-            let height = UserDefaults.standard.double(forKey: gridHeightKey)
-            return width > 0 && height > 0 ? CGSize(width: width, height: height) : nil
+            let defaults = UserDefaults.standard
+            let width = defaults.double(forKey: gridWidthKey)
+            let height = defaults.double(forKey: gridHeightKey)
+            guard width > 0, height > 0 else { return nil }
+            return CGRect(x: defaults.double(forKey: gridLeftKey), y: 0, width: width, height: height)
         }
         set {
-            UserDefaults.standard.set(Double(newValue?.width ?? 0), forKey: gridWidthKey)
-            UserDefaults.standard.set(Double(newValue?.height ?? 0), forKey: gridHeightKey)
+            let defaults = UserDefaults.standard
+            defaults.set(Double(newValue?.minX ?? 0), forKey: gridLeftKey)
+            defaults.set(Double(newValue?.width ?? 0), forKey: gridWidthKey)
+            defaults.set(Double(newValue?.maxY ?? 0), forKey: gridHeightKey)
         }
     }
 
-    private var keyboardSize = KeyboardHost.rememberedSize
+    private var keys = KeyboardHost.rememberedKeys
 
     private let container: UIViewController
     private let box = UIView()
@@ -187,14 +198,16 @@ private final class KeyboardHost: UIViewController {
     private func place() {
         let bounds = view.bounds
         if grid {
-            let measured = keyboardSize.map { $0.width + Self.gridMargin } ?? Self.gridFirstWidth
+            let measured = keys.map { $0.width + 2 * Self.gridMargin } ?? Self.gridFirstWidth
             let width = min(max(measured, Self.gridMinWidth), Self.gridMaxWidth)
-            let tall = keyboardSize.map { $0.height + Self.gridMargin } ?? Self.gridHeight
+            let tall = keys.map { $0.maxY + Self.gridMargin } ?? Self.gridHeight
             box.frame = CGRect(x: bounds.maxX - Self.gridRightInset - width, y: 0,
                                width: width, height: min(tall, bounds.height))
             box.backgroundColor = .black
-            // Laid out at least as wide as it's shown, so the measured keys stay where they were measured.
-            container.view.frame = CGRect(x: 0, y: 0, width: max(Self.gridLayoutWidth, width),
+            // Always laid out the same width, so the keys stay where they were measured; moved left
+            // by the space tvOS leaves before them, less the box's margin.
+            let shift = keys.map { Self.gridMargin - $0.minX } ?? 0
+            container.view.frame = CGRect(x: shift, y: 0, width: Self.gridLayoutWidth,
                                           height: min(Self.gridHeight, bounds.height))
             leftOfBox.frame = CGRect(x: 0, y: 0, width: box.frame.minX, height: bounds.height)
             leftOfBox.isHidden = false
@@ -221,10 +234,10 @@ private final class KeyboardHost: UIViewController {
         guard let window = view.window, presentingViewController != nil else { return }
         var found: Bool?
         /*
-         * The grid keyboard's far edges in the layout, from the narrowest of its tall views: the
+         * Where the grid keyboard's keys sit in the layout, from the narrowest of its tall views: the
          * keys themselves, rather than a view around them that may run the layout's whole width.
          */
-        var far: CGPoint?
+        var measuredKeys: CGRect?
         var narrowest = CGFloat.infinity
         let layout: UIView = container.view
         func look(_ view: UIView) {
@@ -236,8 +249,7 @@ private final class KeyboardHost: UIViewController {
                     // Only a keyboard drawn in the layout itself measures the box.
                     if view.isDescendant(of: layout), size.width < narrowest {
                         narrowest = size.width
-                        let frame = view.convert(view.bounds, to: layout)
-                        far = CGPoint(x: frame.maxX, y: frame.maxY)
+                        measuredKeys = view.convert(view.bounds, to: layout)
                     }
                 } else if found == nil, size.width > 400, size.height > 40, size.height <= 320 {
                     found = false
@@ -250,11 +262,12 @@ private final class KeyboardHost: UIViewController {
         for each in windows { look(each) }
         guard let found else { return }
         var changed = found != grid
-        if found, let far, far.x > 0, far.y > 0 {
-            let size = CGSize(width: far.x.rounded(.up), height: far.y.rounded(.up))
-            if size != keyboardSize {
-                keyboardSize = size
-                Self.rememberedSize = size
+        if found, let measuredKeys, measuredKeys.width > 0, measuredKeys.maxY > 0 {
+            let rounded = CGRect(x: measuredKeys.minX.rounded(.down), y: 0,
+                                 width: measuredKeys.width.rounded(.up), height: measuredKeys.maxY.rounded(.up))
+            if rounded != keys {
+                keys = rounded
+                Self.rememberedKeys = rounded
                 changed = true
             }
         }
