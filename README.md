@@ -372,6 +372,10 @@ Back behaviour and the bundled-player path. It also means:
 - Settings → **Donate** lists the GitHub Sponsors and Ko-fi links as text
   (`https://github.com/sponsors/Viren070`, `https://ko-fi.com/Viren070`) rather than buttons that
   open them, as a TV has no browser to open them in (`patches/web/0011-tvos-donate-shows-links.patch`).
+- On a TV, the remote moves focus along a row of posters and the row scrolls only when the next
+  poster would leave the screen, rather than the focus staying where the row's first poster starts
+  while the row slides under it (`patches/web/0013-tvos-rows-move-focus.patch`). Keys and a
+  gamepad elsewhere keep the page's own behaviour.
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.
