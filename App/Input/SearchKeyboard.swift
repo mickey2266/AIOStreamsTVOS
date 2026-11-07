@@ -29,7 +29,8 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         let below = BelowKeyboard()
         search = UISearchController(searchResultsController: below)
         let container = Container(searchController: search)
-        controller = container
+        let host = KeyboardHost(container: container)
+        controller = host
         super.init()
 
         search.searchResultsUpdater = self
@@ -42,11 +43,13 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         bar.autocorrectionType = .no
         bar.autocapitalizationType = .none
 
-        // Over the page, which shows through below the keyboard.
-        container.modalPresentationStyle = .overFullScreen
+        // Over the page, which shows through beside or below the keyboard.
+        host.modalPresentationStyle = .overFullScreen
+        host.view.backgroundColor = .clear
         container.view.backgroundColor = .clear
         search.view.backgroundColor = .clear
-        below.leave = { [weak container] in container?.dismiss(animated: true) }
+        below.leave = { [weak host] in host?.dismiss(animated: true) }
+        host.leave = { [weak host] in host?.dismiss(animated: true) }
         below.moved = { [weak container] in container?.view.setNeedsLayout() }
         container.disappeared = { [weak self] in self?.close() }
     }
@@ -76,32 +79,187 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
 }
 
 /**
+ * Where the keyboard sits. tvOS lays its search keyboard out itself: the
+ * linear one across the top of the screen, the grid one (Settings → General →
+ * Keyboard) down the left, over the page's navigation and results. An app
+ * can't place it, but it can give it a smaller space to lay out in, so the grid
+ * keyboard gets a box at the screen's top right: its keys' width, clipped from a
+ * wider layout as tvOS lays the search field out across it (as NuvioTVOS hosts
+ * it). The page shows to the left, and moving left off the keys returns to it.
+ *
+ * Which keyboard tvOS drew is read from its views, as NuvioTVOS reads it: one
+ * taller than 320 pt and narrower than 900 pt is the grid. The last one seen is
+ * remembered, so the next keyboard opens in its place, and a change moves it.
+ */
+private final class KeyboardHost: UIViewController {
+    var leave: () -> Void = {}
+
+    // The grid keyboard's box. Measured by NuvioTVOS for its own search screen; this one isn't yet.
+    private static let gridVisibleWidth: CGFloat = 520
+    private static let gridLayoutWidth: CGFloat = 840
+    private static let gridHeight: CGFloat = 860
+    private static let gridRightInset: CGFloat = 80
+    private static let gridKey = "keyboard.gridLayout"
+
+    private static var rememberedGrid: Bool {
+        get { UserDefaults.standard.bool(forKey: gridKey) }
+        set { UserDefaults.standard.set(newValue, forKey: gridKey) }
+    }
+
+    private let container: UIViewController
+    private let box = UIView()
+    private let leftOfBox = FocusTrap()
+    private var grid = KeyboardHost.rememberedGrid
+    private var detectQueued = false
+    private var focusWatch: NSObjectProtocol?
+
+    init(container: UIViewController) {
+        self.container = container
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not from a storyboard") }
+
+    deinit {
+        if let focusWatch { NotificationCenter.default.removeObserver(focusWatch) }
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        box.clipsToBounds = true
+        box.layer.cornerRadius = 28
+        leftOfBox.reached = { [weak self] in self?.leave() }
+        view.addSubview(leftOfBox)
+        view.addSubview(box)
+        addChild(container)
+        box.addSubview(container.view)
+        container.didMove(toParent: self)
+        // Focus moving is when tvOS has the keyboard laid out, and when it may have swapped it.
+        focusWatch = NotificationCenter.default.addObserver(
+            forName: UIFocusSystem.didUpdateNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.detectSoon() }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        place()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        for delay in [0.0, 0.1, 0.3, 0.6, 1.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.detectSoon() }
+        }
+        // Only once the keyboard has taken focus, so it can't land here as the keyboard opens.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.leftOfBox.armed = true }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        leftOfBox.armed = false
+    }
+
+    private func place() {
+        let bounds = view.bounds
+        if grid {
+            let width = Self.gridVisibleWidth
+            box.frame = CGRect(x: bounds.maxX - Self.gridRightInset - width, y: 0,
+                               width: width, height: min(Self.gridHeight, bounds.height))
+            box.backgroundColor = .black
+            container.view.frame = CGRect(x: 0, y: 0, width: Self.gridLayoutWidth, height: box.bounds.height)
+            leftOfBox.frame = CGRect(x: 0, y: 0, width: box.frame.minX, height: bounds.height)
+            leftOfBox.isHidden = false
+        } else {
+            box.frame = bounds
+            box.backgroundColor = .clear
+            container.view.frame = box.bounds
+            leftOfBox.isHidden = true
+        }
+    }
+
+    private func detectSoon() {
+        guard !detectQueued else { return }
+        detectQueued = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.detectQueued = false
+            self.detect()
+        }
+    }
+
+    /// Which keyboard tvOS drew, and the box moved when it isn't the one placed for.
+    private func detect() {
+        guard let window = view.window, presentingViewController != nil else { return }
+        var found: Bool?
+        func look(_ view: UIView) {
+            guard !view.isHidden, view.alpha > 0 else { return }
+            if String(describing: type(of: view)).contains("Keyboard") {
+                let size = view.bounds.size
+                if size.height > 320, size.width > 200, size.width < 900 {
+                    found = true
+                } else if found == nil, size.width > 400, size.height > 40, size.height <= 320 {
+                    found = false
+                }
+            }
+            for subview in view.subviews { look(subview) }
+        }
+        // The keyboard may be drawn in a window of its own.
+        let windows = window.windowScene?.windows ?? [window]
+        for each in windows { look(each) }
+        guard let found, found != grid else { return }
+        grid = found
+        Self.rememberedGrid = found
+        UIView.animate(withDuration: 0.2) {
+            self.place()
+            self.container.view.layoutIfNeeded()
+        }
+    }
+}
+
+/**
  * Reports when it goes, however it was closed: Menu, moving off the keyboard,
  * or return. Draws a solid backdrop behind the keyboard, so the page doesn't
- * show through its keys; the page still shows below it, where the results are.
+ * show through its keys; the page still shows where tvOS puts the results.
+ * With the linear keyboard that's below it; with the grid keyboard (Settings →
+ * General → Keyboard), beside it, and the backdrop then covers the keyboard's
+ * column down the whole screen as well as the strip above.
  */
 private final class Container: UISearchContainerViewController {
     var disappeared: () -> Void = {}
     private let backdrop = UIView()
+    private let cutOut = CAShapeLayer()
 
     override func viewDidLoad() {
         super.viewDidLoad()
         // tvOS has no systemBackground; the app's dark style is black.
         backdrop.backgroundColor = .black
         backdrop.isUserInteractionEnabled = false
+        cutOut.fillRule = .evenOdd
         view.insertSubview(backdrop, at: 0)
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         view.sendSubviewToBack(backdrop)
-        // Down to where the space below the keyboard starts; the whole screen until tvOS shows it.
-        var bottom = view.bounds.maxY
-        if let below = searchController.searchResultsController?.view, below.window != nil, !below.isHidden, below.alpha > 0 {
-            let top = below.convert(below.bounds, to: view).minY
-            if top > 0, top < view.bounds.maxY { bottom = top }
+        backdrop.frame = view.bounds
+        // The whole screen, less the results' space once tvOS shows it, wherever it puts it.
+        guard let below = searchController.searchResultsController?.view, below.window != nil,
+              !below.isHidden, below.alpha > 0 else {
+            backdrop.layer.mask = nil
+            return
         }
-        backdrop.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: bottom)
+        let results = below.convert(below.bounds, to: view).intersection(view.bounds)
+        // Nothing left to show the keyboard over: leave the screen covered.
+        guard !results.isNull, !results.isEmpty, results != view.bounds else {
+            backdrop.layer.mask = nil
+            return
+        }
+        let path = UIBezierPath(rect: view.bounds)
+        path.append(UIBezierPath(rect: results))
+        cutOut.frame = view.bounds
+        cutOut.path = path.cgPath
+        backdrop.layer.mask = cutOut
     }
 
     override func viewDidDisappear(_ animated: Bool) {
