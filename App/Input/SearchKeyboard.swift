@@ -94,17 +94,41 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
 private final class KeyboardHost: UIViewController {
     var leave: () -> Void = {}
 
-    // The grid keyboard's box. Measured by NuvioTVOS for its own search screen; this one isn't yet.
-    private static let gridVisibleWidth: CGFloat = 520
+    /*
+     * The grid keyboard's box: as wide and tall as the keyboard tvOS draws, read from its view once
+     * it's laid out, plus a margin. NuvioTVOS's 520 pt clipped this one's last column of keys, so
+     * 640 is the first guess until a keyboard has been measured; the measure is remembered.
+     */
+    private static let gridFirstWidth: CGFloat = 640
+    private static let gridMinWidth: CGFloat = 520
+    private static let gridMaxWidth: CGFloat = 960
     private static let gridLayoutWidth: CGFloat = 840
     private static let gridHeight: CGFloat = 860
-    private static let gridRightInset: CGFloat = 80
+    private static let gridMargin: CGFloat = 40
+    private static let gridRightInset: CGFloat = 60
     private static let gridKey = "keyboard.gridLayout"
+    private static let gridWidthKey = "keyboard.gridWidth"
+    private static let gridHeightKey = "keyboard.gridHeight"
 
     private static var rememberedGrid: Bool {
         get { UserDefaults.standard.bool(forKey: gridKey) }
         set { UserDefaults.standard.set(newValue, forKey: gridKey) }
     }
+
+    /// The keyboard's measured size in the box, as its far edges in the layout.
+    private static var rememberedSize: CGSize? {
+        get {
+            let width = UserDefaults.standard.double(forKey: gridWidthKey)
+            let height = UserDefaults.standard.double(forKey: gridHeightKey)
+            return width > 0 && height > 0 ? CGSize(width: width, height: height) : nil
+        }
+        set {
+            UserDefaults.standard.set(Double(newValue?.width ?? 0), forKey: gridWidthKey)
+            UserDefaults.standard.set(Double(newValue?.height ?? 0), forKey: gridHeightKey)
+        }
+    }
+
+    private var keyboardSize = KeyboardHost.rememberedSize
 
     private let container: UIViewController
     private let box = UIView()
@@ -163,11 +187,15 @@ private final class KeyboardHost: UIViewController {
     private func place() {
         let bounds = view.bounds
         if grid {
-            let width = Self.gridVisibleWidth
+            let measured = keyboardSize.map { $0.width + Self.gridMargin } ?? Self.gridFirstWidth
+            let width = min(max(measured, Self.gridMinWidth), Self.gridMaxWidth)
+            let tall = keyboardSize.map { $0.height + Self.gridMargin } ?? Self.gridHeight
             box.frame = CGRect(x: bounds.maxX - Self.gridRightInset - width, y: 0,
-                               width: width, height: min(Self.gridHeight, bounds.height))
+                               width: width, height: min(tall, bounds.height))
             box.backgroundColor = .black
-            container.view.frame = CGRect(x: 0, y: 0, width: Self.gridLayoutWidth, height: box.bounds.height)
+            // Laid out at least as wide as it's shown, so the measured keys stay where they were measured.
+            container.view.frame = CGRect(x: 0, y: 0, width: max(Self.gridLayoutWidth, width),
+                                          height: min(Self.gridHeight, bounds.height))
             leftOfBox.frame = CGRect(x: 0, y: 0, width: box.frame.minX, height: bounds.height)
             leftOfBox.isHidden = false
         } else {
@@ -192,12 +220,25 @@ private final class KeyboardHost: UIViewController {
     private func detect() {
         guard let window = view.window, presentingViewController != nil else { return }
         var found: Bool?
+        /*
+         * The grid keyboard's far edges in the layout, from the narrowest of its tall views: the
+         * keys themselves, rather than a view around them that may run the layout's whole width.
+         */
+        var far: CGPoint?
+        var narrowest = CGFloat.infinity
+        let layout = container.view
         func look(_ view: UIView) {
             guard !view.isHidden, view.alpha > 0 else { return }
             if String(describing: type(of: view)).contains("Keyboard") {
                 let size = view.bounds.size
                 if size.height > 320, size.width > 200, size.width < 900 {
                     found = true
+                    // Only a keyboard drawn in the layout itself measures the box.
+                    if view.isDescendant(of: layout), size.width < narrowest {
+                        narrowest = size.width
+                        let frame = view.convert(view.bounds, to: layout)
+                        far = CGPoint(x: frame.maxX, y: frame.maxY)
+                    }
                 } else if found == nil, size.width > 400, size.height > 40, size.height <= 320 {
                     found = false
                 }
@@ -207,7 +248,17 @@ private final class KeyboardHost: UIViewController {
         // The keyboard may be drawn in a window of its own.
         let windows = window.windowScene?.windows ?? [window]
         for each in windows { look(each) }
-        guard let found, found != grid else { return }
+        guard let found else { return }
+        var changed = found != grid
+        if found, let far, far.x > 0, far.y > 0 {
+            let size = CGSize(width: far.x.rounded(.up), height: far.y.rounded(.up))
+            if size != keyboardSize {
+                keyboardSize = size
+                Self.rememberedSize = size
+                changed = true
+            }
+        }
+        guard changed else { return }
         grid = found
         Self.rememberedGrid = found
         UIView.animate(withDuration: 0.2) {
