@@ -13,8 +13,6 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
     private var text: String
     private var submitted = false
     private var closed = false
-    /// Kept while the keyboard shows: what it presents doesn't keep its transitioning delegate.
-    private let panel = RightPanel()
     private let onChange: (String) -> Void
     private let onClose: (_ submit: Bool) -> Void
 
@@ -44,12 +42,12 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         bar.autocorrectionType = .no
         bar.autocapitalizationType = .none
 
-        // A panel over the screen's right half, the page in view to its left.
-        container.modalPresentationStyle = .custom
-        container.transitioningDelegate = panel
-        container.view.backgroundColor = UIColor(white: 0.06, alpha: 0.85)
+        // Over the page, which shows through beside or below the keyboard, wherever tvOS puts it.
+        container.modalPresentationStyle = .overFullScreen
+        container.view.backgroundColor = .clear
         search.view.backgroundColor = .clear
         below.leave = { [weak container] in container?.dismiss(animated: true) }
+        below.moved = { [weak container] in container?.view.setNeedsLayout() }
         container.disappeared = { [weak self] in self?.close() }
     }
 
@@ -78,41 +76,49 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
 }
 
 /**
- * The keyboard as a panel over the screen's right half, linear and grid alike,
- * with the page in view to its left: tvOS lays its keyboard out across
- * whatever space it's given, so the panel's frame places it, as the
- * aiostreams-tvos project presents it. The page isn't drawn over, so nothing
- * shows through the keys.
+ * Reports when it goes, however it was closed: Menu, moving off the keyboard,
+ * or return. Draws a solid backdrop behind the keyboard, so the page doesn't
+ * show through its keys; the page still shows where tvOS puts the results.
+ * With the linear keyboard that's below it; with the grid keyboard (Settings →
+ * General → Keyboard), beside it, and the backdrop then covers the keyboard's
+ * column down the whole screen as well as the strip above.
  */
-private final class RightPanel: NSObject, UIViewControllerTransitioningDelegate {
-    func presentationController(
-        forPresented presented: UIViewController,
-        presenting: UIViewController?,
-        source: UIViewController
-    ) -> UIPresentationController? {
-        RightPanelPresentation(presentedViewController: presented, presenting: presenting)
-    }
-}
-
-private final class RightPanelPresentation: UIPresentationController {
-    override var frameOfPresentedViewInContainerView: CGRect {
-        guard let bounds = containerView?.bounds else { return .zero }
-        let width = (bounds.width / 2).rounded(.down)
-        return CGRect(x: bounds.maxX - width, y: 0, width: width, height: bounds.height)
-    }
-
-    // The page stays on screen beside the panel.
-    override var shouldRemovePresentersView: Bool { false }
-
-    override func containerViewWillLayoutSubviews() {
-        super.containerViewWillLayoutSubviews()
-        presentedView?.frame = frameOfPresentedViewInContainerView
-    }
-}
-
-/** Reports when it goes, however it was closed: Menu, moving off the keyboard, or return. */
 private final class Container: UISearchContainerViewController {
     var disappeared: () -> Void = {}
+    private let backdrop = UIView()
+    private let cutOut = CAShapeLayer()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // tvOS has no systemBackground; the app's dark style is black.
+        backdrop.backgroundColor = .black
+        backdrop.isUserInteractionEnabled = false
+        cutOut.fillRule = .evenOdd
+        view.insertSubview(backdrop, at: 0)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        view.sendSubviewToBack(backdrop)
+        backdrop.frame = view.bounds
+        // The whole screen, less the results' space once tvOS shows it, wherever it puts it.
+        guard let below = searchController.searchResultsController?.view, below.window != nil,
+              !below.isHidden, below.alpha > 0 else {
+            backdrop.layer.mask = nil
+            return
+        }
+        let results = below.convert(below.bounds, to: view).intersection(view.bounds)
+        // Nothing left to show the keyboard over: leave the screen covered.
+        guard !results.isNull, !results.isEmpty, results != view.bounds else {
+            backdrop.layer.mask = nil
+            return
+        }
+        let path = UIBezierPath(rect: view.bounds)
+        path.append(UIBezierPath(rect: results))
+        cutOut.frame = view.bounds
+        cutOut.path = path.cgPath
+        backdrop.layer.mask = cutOut
+    }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -121,9 +127,9 @@ private final class Container: UISearchContainerViewController {
 }
 
 /**
- * The panel's space for results, wherever tvOS puts it: one focus target
- * across it. Moving onto it leaves the keyboard for the page, as moving to
- * the results does in tvOS's own search.
+ * The space below the keyboard: see-through, so the page's results show,
+ * and one focus target across it. Moving down onto it leaves the keyboard
+ * for the page, as moving to the results does in tvOS's own search.
  */
 private final class BelowKeyboard: UIViewController {
     var leave: () -> Void = {}
@@ -138,8 +144,29 @@ private final class BelowKeyboard: UIViewController {
         view.addSubview(trap)
     }
 
+    /// Where it sits changed, so the backdrop above it follows.
+    var moved: () -> Void = {}
+
+    private var placed: CGRect?
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Only when it really moved, so the two layouts can't keep starting each other.
+        let now = view.convert(view.bounds, to: nil)
+        guard now != placed else { return }
+        placed = now
+        moved()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        placed = nil
+        moved()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        moved()
         // Only once the keyboard has taken focus, so it can't land here as the keyboard opens.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.trap.armed = true }
     }
