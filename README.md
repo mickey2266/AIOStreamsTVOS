@@ -408,6 +408,11 @@ Back behaviour and the bundled-player path. It also means:
   skips. Here it's a stop of its own above the row's posters: Up from any of them goes to it, Down
   into the row from above lands on it first, and Click opens the catalog
   (`patches/web/0018-tvos-row-titles-open-catalog.patch`).
+- With **Infuse** as the player (Settings → Playback → Player), the link names the video by its title,
+  with the episode for an episode, rather than the file's name:
+  `infuse://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}`
+  (`patches/web/0019-tvos-infuse-link-names-the-title.patch`). Infuse opens the `aiostreams://` link
+  in `x-success` when it's done, and the page saves where it stopped.
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.

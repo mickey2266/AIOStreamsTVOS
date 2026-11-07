@@ -1,0 +1,15 @@
+diff --git a/packages/web/src/lib/playback/player-choice.ts b/packages/web/src/lib/playback/player-choice.ts
+--- a/packages/web/src/lib/playback/player-choice.ts
++++ b/packages/web/src/lib/playback/player-choice.ts
+@@ -68,8 +68,10 @@ export const LINK_PLAYERS: readonly {
+     id: 'infuse',
+     // eslint-disable-next-line lingui/no-unlocalized-strings -- an app's name
+     name: 'Infuse',
++    // Infuse shows the title, with the episode for an episode, rather than the
++    // file's name, and gets the link back first (AIOStreamsTVOS).
+     template:
+-      'infuse://x-callback-url/play?url={encodedUrl}&filename={filename}&sub={subtitles}&position={position}&x-success={returnUrl}',
++      'infuse://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}',
+     platforms: ['ios', 'macos'],
+   },
+   {
