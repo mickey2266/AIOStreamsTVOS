@@ -408,6 +408,28 @@ enum BridgeScript {
     !el.closest(OWN_KEYS) &&
     !document.querySelector('[role=dialog][data-state=open], [role=alertdialog][data-state=open]');
   const focusNav = (to) => to.focus({ preventScroll: true, focusVisible: true });
+  /*
+   * A catalog or collection is a grid (`data-nav-wrap`), where Left from the
+   * first poster of a line wraps to the end of the line above, as text does,
+   * so focus moves and the check after the key never sees it stay. Left from
+   * a line's first poster goes to the navigation instead; Right off a line's
+   * end still wraps. Left to right grids only.
+   */
+  const startsGridLine = (el) => {
+    const grid = el.closest?.('[data-nav-wrap]');
+    if (!grid || getComputedStyle(grid).direction === 'rtl') return false;
+    let cell = el;
+    while (cell && cell.parentElement !== grid) cell = cell.parentElement;
+    if (!cell) return false;
+    const at = cell.getBoundingClientRect();
+    for (let prev = cell.previousElementSibling; prev; prev = prev.previousElementSibling) {
+      const r = prev.getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      // The poster before it sits at or past its left edge: on the line above.
+      return r.left >= at.left - 1;
+    }
+    return true;
+  };
   document.addEventListener('focusin', () => {
     if (leftFrom && !document.activeElement?.closest?.(NAV_SIDE)) leftFrom = null;
   });
@@ -455,6 +477,17 @@ enum BridgeScript {
             url: el.type === 'url' || el.inputMode === 'url',
           });
           return;
+        }
+        // Left from the first poster of a grid's line: into the navigation, not up a line.
+        if (name === 'ArrowLeft' && !repeat && inRow(el) && startsGridLine(el)) {
+          const to = navEntry();
+          if (to) {
+            lastDown = performance.now();
+            leftFrom = el;
+            swallowed = name;
+            focusNav(to);
+            return;
+          }
         }
         // A held key, or presses as quick as one, such as a fast swipe on the clickpad.
         const now = performance.now();
