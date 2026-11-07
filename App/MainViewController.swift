@@ -321,6 +321,9 @@ final class MainViewController: UIViewController, RemoteReceiver {
         guard presentedViewController == nil else { return }
         // In steps: as one expression, the compiler gives up type-checking it.
         var lines: [String] = ["App \(Identity.version) · web app \(WebApp.commit) · \(storage.keyCount) saved keys", ""]
+        // First, so the swipes just made are on screen as the menu opens.
+        lines += input.report
+        lines.append("")
         lines += AppAnswers.videoLines(player: engine, window: view.window)
         lines.append("")
         lines += MemoryLog.report
