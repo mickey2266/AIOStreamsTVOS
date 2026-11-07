@@ -102,52 +102,6 @@ final class RemoteInput {
     /// Presses that began here and haven't ended, whose ends come here too (`owns`).
     private var down: Set<UIPress.PressType> = []
 
-    // MARK: Input log
-
-    /**
-     * The last remote events and what they sent the page, for the app menu: to see where a wrong
-     * arrow comes from. Times are seconds, with the finger's place in points (`touch.location`).
-     */
-    private var trail: [String] = []
-    private static let trailLength = 40
-    /// Where the touch under way was last noted, so a moving finger is noted every so often.
-    private var notedAt: CGPoint?
-    private static let noteEvery: CGFloat = 40
-
-    var report: [String] {
-        ["Remote (last \(trail.count) events, newest last; finger in points):"]
-            + (trail.isEmpty ? ["  nothing yet"] : trail)
-    }
-
-    private func note(_ text: String) {
-        let time = ProcessInfo.processInfo.systemUptime.truncatingRemainder(dividingBy: 1000)
-        trail.append(String(format: "  %7.2f  ", time) + text)
-        if trail.count > Self.trailLength { trail.removeFirst(trail.count - Self.trailLength) }
-    }
-
-    private static func point(_ p: CGPoint) -> String {
-        String(format: "(%.0f, %.0f)", p.x, p.y)
-    }
-
-    private var fingerNote: String {
-        touchDown ? "finger at \(Self.point(touchAt))" : "no finger"
-    }
-
-    private static func name(_ type: UIPress.PressType) -> String {
-        switch type {
-        case .upArrow: return "Up"
-        case .downArrow: return "Down"
-        case .leftArrow: return "Left"
-        case .rightArrow: return "Right"
-        case .select: return "Select"
-        case .menu: return "Menu"
-        case .playPause: return "Play/Pause"
-        case .pageUp: return "PageUp"
-        case .pageDown: return "PageDown"
-        default: return "press \(type.rawValue)"
-        }
-    }
-
     /**
      * Whether this press began here. Its end still belongs here when something has opened over the
      * page since (Up from a searchable list's top entry opens the search keyboard while Up is still
@@ -184,7 +138,6 @@ final class RemoteInput {
         let ended = press.phase == .ended || press.phase == .cancelled
         guard began || ended else { return }
         if began { down.insert(press.type) } else { down.remove(press.type) }
-        note("\(Self.name(press.type)) \(began ? "pressed" : press.phase == .cancelled ? "cancelled" : "let go"), \(fingerNote)")
 
         switch press.type {
         case .menu:
@@ -207,7 +160,6 @@ final class RemoteInput {
             let arrow = Self.isArrow(press.type)
             if began {
                 if arrow, partOfSwipe {
-                    note("    dropped: during or just after a swipe")
                     dropped.insert(press.type)
                     return
                 }
@@ -217,7 +169,6 @@ final class RemoteInput {
                     holdPending(press.type, key)
                     return
                 }
-                note("    sent \(key) down")
                 keyDown(key, false)
                 if key != "Enter" { startRepeating(key) }
             } else {
@@ -225,17 +176,12 @@ final class RemoteInput {
                 if let held = pending, held.type == press.type {
                     clearPending()
                     // The finger slid off the edge: the start of a swipe, not a click.
-                    if fingerMoved(since: held.from) {
-                        note("    dropped: finger moved \(Self.travel(held.from, touchAt))")
-                        return
-                    }
+                    if fingerMoved(since: held.from) { return }
                     // Let go before it settled: a quick click, which steps once.
-                    note("    sent \(key): quick click")
                     tap(key)
                     return
                 }
                 stopRepeating()
-                note("    sent \(key) up")
                 keyUp(key)
             }
         }
@@ -266,7 +212,6 @@ final class RemoteInput {
         pendingTimer = Timer.scheduledTimer(withTimeInterval: Self.pressSettle, repeats: false) { [weak self] _ in
             guard let self, let held = self.pending else { return }
             if self.fingerMoved(since: held.from) {
-                self.note("    dropped \(held.key): finger moved \(Self.travel(held.from, self.touchAt))")
                 self.clearPending()
                 self.dropped.insert(held.type)
                 return
@@ -280,15 +225,9 @@ final class RemoteInput {
                 }
             }
             self.clearPending()
-            self.note("    sent \(held.key) down: settled (look \(looks), \(self.fingerNote))")
             self.keyDown(held.key, false)
             self.startRepeating(held.key)
         }
-    }
-
-    private static func travel(_ from: CGPoint?, _ to: CGPoint) -> String {
-        guard let from else { return "(no touch seen)" }
-        return String(format: "%.0f, %.0f pt", to.x - from.x, to.y - from.y)
     }
 
     /// The finger on the surface has moved further than a click moves it since `from`.
@@ -312,18 +251,13 @@ final class RemoteInput {
     /// The finger turned out to be swiping: an arrow still waiting is the swipe's, not a click.
     private func swipeStarted() {
         touchSwiping = true
-        note("  swipe started at \(Self.point(touchAt)), from \(Self.point(swipeAnchor))")
         if let held = pending {
-            note("    dropped \(held.key): the swipe's")
             clearPending()
             dropped.insert(held.type)
         }
         // An arrow that settled before the finger set off keeps its one step, but doesn't repeat
         // against the swipe.
-        if let key = repeating, key.hasPrefix("Arrow") {
-            note("    stopped \(key) repeating")
-            stopRepeating()
-        }
+        if let key = repeating, key.hasPrefix("Arrow") { stopRepeating() }
     }
 
     /**
@@ -343,16 +277,12 @@ final class RemoteInput {
         }
         switch touch.phase {
         case .began:
-            note("touch down at \(Self.point(at))")
-            notedAt = at
             startTouch(id, at)
             downAt = at
         case .moved, .stationary:
             // A touch whose start wasn't seen is measured from where it's first seen, not from
             // where the last swipe began, which could read as the opposite direction.
             if swipeTouch != id {
-                note("touch first seen at \(Self.point(at)) (its start was missed)")
-                notedAt = at
                 startTouch(id, at)
                 // A move is where the finger really is, so it anchors the swipe.
                 anchored = true
@@ -360,18 +290,12 @@ final class RemoteInput {
             }
             if !anchored {
                 // The first move: where the finger really is. The swipe starts here.
-                note("  first move at \(Self.point(at)), measured from here")
                 anchored = true
                 swipeAnchor = at
                 lastAt = at
-                notedAt = at
                 // An arrow pressed as the touch came down was measured from tvOS's down point.
                 if let held = pending, let downAt, held.from == downAt { pending = (held.type, held.key, at) }
                 return
-            }
-            if let last = notedAt, max(abs(at.x - last.x), abs(at.y - last.y)) >= Self.noteEvery {
-                note("  finger at \(Self.point(at))")
-                notedAt = at
             }
             let dx = at.x - swipeAnchor.x
             let dy = at.y - swipeAnchor.y
@@ -408,13 +332,9 @@ final class RemoteInput {
                 let key = across
                     ? (swipeSign > 0 ? "ArrowRight" : "ArrowLeft")
                     : (swipeSign > 0 ? "ArrowDown" : "ArrowUp")
-                note("    sent \(key): swipe step \(swipeSteps) " + String(format: "(%.0f, %.0f pt)", dx, dy))
                 tap(key)
             }
         case .ended, .cancelled:
-            note("touch \(touch.phase == .cancelled ? "cancelled" : "up") at \(Self.point(at))"
-                + String(format: ", moved %.0f, %.0f pt", at.x - swipeAnchor.x, at.y - swipeAnchor.y))
-            notedAt = nil
             if touchSwiping { swipeEndedAt = ProcessInfo.processInfo.systemUptime }
             resetSteps()
             touchDown = false
