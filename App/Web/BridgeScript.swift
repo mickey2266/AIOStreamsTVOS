@@ -72,6 +72,31 @@ enum BridgeScript {
    */
   const SLIDES = true;
   /*
+   * A keyed move up or down eases the scroll position itself, frame by frame:
+   * the page's glide code finds no layer to ease a box's content in
+   * (patches/web/0014), the page's and the home rows' box alike. Its own way
+   * jumps and eases the whole content, a layer the page's height, back over the
+   * jump, and on an Apple TV that judders even on the settings page, which has
+   * no artwork. Rows across keep their eased layers.
+   */
+  const PAGE_SCROLLS = true;
+  try {
+    Object.defineProperty(window, '__aioTVScrolls', { value: PAGE_SCROLLS });
+  } catch {}
+  /*
+   * Test: those keyed scrolls up and down are WebKit's own smooth scroll
+   * (`scrollTo` with `behavior: 'smooth'`, patches/web/0017) rather than the
+   * page's, which sets the scroll position from the page's thread each frame:
+   * any long task there, such as a row's cards mounting, stalls the scroll.
+   * WebKit's runs where the page's work can't hold it up, but starts again
+   * from a standstill at each press, which a held key's repeats may show.
+   * Set it to false for the page's own easing again.
+   */
+  const NATIVE_SCROLLS = true;
+  try {
+    Object.defineProperty(window, '__aioTVNativeScrolls', { value: PAGE_SCROLLS && NATIVE_SCROLLS });
+  } catch {}
+  /*
    * Test: no masks or filters. The kills come within a second or two of an
    * item page opening with its version picker (`?pick=`), which draws its
    * backdrop under two nested `mask-image`s, or, without one, a poster under
@@ -99,9 +124,21 @@ enum BridgeScript {
         '.animate-pulse,.UI-Skeleton__root{animation:none!important}'
       );
     else if (!SLIDES) rules.push('[data-glide-layer]{will-change:auto!important}');
+    /*
+     * The page's "Blur episodes you haven't started" setting marks the page
+     * `data-blur-spoilers` and blurs those episodes' pictures and text with
+     * `filter`, so while it's on, the pictures and text it blurs keep their
+     * filters. A blurred episode card is small, and a remote's focus on one
+     * takes its blur off.
+     */
+    const SPOILERS =
+      "[data-ui='artwork'],[data-ui='episode-title']>span,p[data-ui='episode-title']," +
+      "[data-ui='episode-synopsis'],[data-ui='wide-card-subtitle']";
     if (!EFFECTS)
       rules.push(
-        '*,*::before,*::after{filter:none!important;-webkit-backdrop-filter:none!important;' +
+        'html:not([data-blur-spoilers]) *,html[data-blur-spoilers] *:not(' + SPOILERS + '),' +
+          '*::before,*::after{filter:none!important}',
+        '*,*::before,*::after{-webkit-backdrop-filter:none!important;' +
           'backdrop-filter:none!important;-webkit-mask-image:none!important;mask-image:none!important}'
       );
     if (rules.length) {
@@ -131,8 +168,8 @@ enum BridgeScript {
   /*
    * The page keeps every card it has shown mounted, and WebKit keeps each
    * mounted <img>'s decoded picture, so a long scroll through a catalog
-   * fills WebKit's process until tvOS ends it ("ran out of memory"). Artwork
-   * far from the screen (`data-ui=artwork`: the poster and wide cards' pictures)
+   * fills WebKit's process until tvOS ends it ("ran out of memory"). A
+   * picture far from the screen (cards' artwork, backdrops, logos)
    * has its picture swapped for a blank one, which lets WebKit drop the
    * decoded copy, and gets it back as it nears the screen again, from
    * WebKit's cache. A swap React made since is left alone. Measured on
@@ -142,6 +179,12 @@ enum BridgeScript {
    * within one was still being decoded as a scroll reached it, which judders.
    * When tvOS warns of low memory, `trim` lets go of all but a little past
    * where pictures come back, so the next sweep doesn't restore them at once.
+   *
+   * Every picture is swept, not only the cards': a backdrop is the biggest
+   * one there is. A page the page keeps but doesn't draw (the home page under
+   * every other, or the whole page under the player) is inert and skipped by
+   * layout; its pictures are let go of wherever they sit, and come back when
+   * it's drawn again, as the inert attribute comes off.
    */
   const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const RELEASE_SCREENS = 3;
@@ -157,12 +200,30 @@ enum BridgeScript {
     if (!w || !h) return;
     // Every box is read before any picture changes, so the page is laid out once, not after each swap.
     const found = [];
-    for (const img of document.querySelectorAll('img[data-ui="artwork"]')) {
+    // The few inert boxes are looked at once, rather than every picture looking up through its ancestors.
+    const hidden = new Set();
+    for (const box of document.querySelectorAll('[inert]')) {
+      // A kept page is `invisible` and skips its content; a closed panel is inert but drawn.
+      const style = getComputedStyle(box);
+      if (style.visibility !== 'hidden' && style.contentVisibility !== 'hidden') continue;
+      for (const img of box.getElementsByTagName('img')) hidden.add(img);
+    }
+    for (const img of document.images) {
       const src = img.getAttribute('src');
       if (!src) continue;
+      // The page's own inline pictures are left alone; the blank one only when the sweep put it there.
+      if (src === BLANK ? !released.has(img) : src.startsWith('data:')) continue;
+      // Not read for its box: inside skipped content, that would lay the kept page out.
+      if (hidden.has(img)) {
+        found.push([img, src, Infinity]);
+        continue;
+      }
       const rect = img.getBoundingClientRect();
-      // Not laid out (a hidden page): left as it is.
-      if (!rect.width && !rect.height) continue;
+      if (!rect.width && !rect.height) {
+        // Not laid out: a kept page goes, anything else (a closed menu's) is left as it is.
+        if (img.closest('[inert]')) found.push([img, src, Infinity]);
+        continue;
+      }
       found.push([img, src, Math.max(away(rect, h, 'top', 'bottom'), away(rect, w, 'left', 'right'))]);
     }
     for (const [img, src, far] of found) {
@@ -206,6 +267,14 @@ enum BridgeScript {
   try {
     // Capture: the page and each row scroll in their own containers.
     document.addEventListener('scroll', soonSweep, { capture: true, passive: true });
+  } catch {}
+  try {
+    // A page kept out of sight, or drawn again: its pictures go, or come back.
+    new MutationObserver(() => soonSweep()).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['inert'],
+      subtree: true,
+    });
   } catch {}
 
   const listeners = new Set();
@@ -271,7 +340,10 @@ enum BridgeScript {
     platform: 'android',
     tv: true,
     voice: false,
-    gamepads: false,
+    // The page then listens for `gamepad` messages instead of polling the Gamepad API every frame,
+    // as it otherwise does on a host without this. None are sent: tvOS hands a controller's d-pad
+    // and buttons to AppWindow as presses, like the remote's, and those reach the page as keys.
+    gamepadButtons: true,
     // The page hides its player while the picture-in-picture window shows; the app's button in the
     // player starts the window (PictureInPicture.swift).
     pip: true,
@@ -311,25 +383,54 @@ enum BridgeScript {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   };
   let editing = null;
-  let swallowed = false;
+  /** The key that opened the keyboard, whose release the page never saw pressed. */
+  let swallowed = null;
   /*
-   * A searchable list, such as Discover's catalog picker: its search field
-   * keeps focus while Up and Down move a highlight through the list
-   * (aria-activedescendant, or cmdk's highlighted item), and Enter picks the
-   * highlighted entry. Once the list has been moved through, Enter there
-   * goes to the page to pick; straight away, it opens the keyboard to search.
+   * A searchable list, such as the pickers with the up and down carets (the
+   * page's Combobox, on cmdk): its search field keeps focus while Up and Down
+   * move a highlight through the list (aria-activedescendant, or cmdk's
+   * highlighted item). Enter picks whatever is highlighted, as cmdk highlights
+   * the first entry as the list opens and the first match after a search, so
+   * Enter on it straight away is a pick too. The keyboard opens with Up from
+   * the top entry, onto the search field above the list, or with Enter when
+   * nothing is highlighted (a search that matched nothing).
    */
-  let movedIn = null;
   const listField = (el) =>
     !!el &&
     (el.hasAttribute('aria-activedescendant') ||
       el.hasAttribute('cmdk-input') ||
       el.getAttribute('role') === 'combobox');
-  const highlighted = (el) => {
+  const isHighlighted = (item) =>
+    !!item &&
+    (item.getAttribute('data-selected') === 'true' || item.getAttribute('aria-selected') === 'true');
+  /** The list's entries a highlight can land on, first to last. */
+  const entries = (el) => {
+    const root = el.closest('[cmdk-root]');
+    if (root)
+      return [...root.querySelectorAll('[cmdk-item]')].filter(
+        (item) => item.getAttribute('aria-disabled') !== 'true' && item.getAttribute('data-disabled') !== 'true'
+      );
+    const id = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+    const list = id && document.getElementById(id);
+    return list
+      ? [...list.querySelectorAll('[role=option]')].filter((item) => item.getAttribute('aria-disabled') !== 'true')
+      : [];
+  };
+  const highlightedEntry = (el) => {
     const id = el.getAttribute('aria-activedescendant');
-    if (id && document.getElementById(id)) return true;
-    const list = el.closest('[cmdk-root]');
-    return !!list?.querySelector('[cmdk-item][data-selected=true], [cmdk-item][aria-selected=true]');
+    const active = id && document.getElementById(id);
+    if (active) return active;
+    return entries(el).find(isHighlighted) || null;
+  };
+  /**
+   * Up from here leaves the list for its search field: the top entry is highlighted, or the open
+   * list has nothing to highlight. A closed list field keeps Up for moving on.
+   */
+  const atTop = (el) => {
+    const all = entries(el);
+    if (!all.length) return el.getAttribute('aria-expanded') === 'true';
+    const current = highlightedEntry(el);
+    return !current || current === all[0];
   };
 
   const key = (type, name, repeat) =>
@@ -343,18 +444,90 @@ enum BridgeScript {
       })
     );
 
+  /*
+   * Left from a row's first poster opens the navigation on the left. The page
+   * moves focus into it only when nothing on its own side sits just beside
+   * focus, so near the top of the home page (the hero, Continue Watching,
+   * Next Up) Left from the first card often went nowhere. When Left from a
+   * card in a row leaves focus where it was, it goes to the navigation's
+   * current page, as the page enters it itself; Right from there comes back
+   * to the card. Not in a dialog, the player, a text field or a slider.
+   */
+  const NAV_SIDE = '[data-ui="tv-rail"], [data-ui="sidebar"], [data-ui="corner-menu"]';
+  const OWN_KEYS =
+    '[role=dialog], [role=alertdialog], [role=menu], [role=listbox], [role=slider], [role=combobox], ' +
+    'input, textarea, select, [contenteditable=""], [contenteditable=true], [data-ui="player-controls"]';
+  /** The card focus left for the navigation, which Right returns to. */
+  let leftFrom = null;
+  const shown = (el) => !!el && el.isConnected && el.getClientRects().length > 0;
+  const navEntry = () => {
+    const nav = [...document.querySelectorAll(NAV_SIDE)].find(shown);
+    if (!nav) return null;
+    const named = nav.dataset.navEnter && nav.querySelector(nav.dataset.navEnter);
+    if (shown(named)) return named;
+    const current = nav.querySelector('[aria-current="page"]');
+    if (shown(current)) return current;
+    return [...nav.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"])')].find(shown) || null;
+  };
+  const inRow = (el) =>
+    !!el &&
+    el !== document.body &&
+    !!el.closest('[data-nav-row], [data-nav-group]') &&
+    !el.closest(NAV_SIDE) &&
+    !el.closest(OWN_KEYS) &&
+    !document.querySelector('[role=dialog][data-state=open], [role=alertdialog][data-state=open]');
+  const focusNav = (to) => to.focus({ preventScroll: true, focusVisible: true });
+  /*
+   * A catalog or collection is a grid (`data-nav-wrap`), where Left from the
+   * first poster of a line wraps to the end of the line above, as text does,
+   * so focus moves and the check after the key never sees it stay. Left from
+   * a line's first poster goes to the navigation instead; Right off a line's
+   * end still wraps. Left to right grids only.
+   */
+  const startsGridLine = (el) => {
+    const grid = el.closest?.('[data-nav-wrap]');
+    if (!grid || getComputedStyle(grid).direction === 'rtl') return false;
+    let cell = el;
+    while (cell && cell.parentElement !== grid) cell = cell.parentElement;
+    if (!cell) return false;
+    const at = cell.getBoundingClientRect();
+    for (let prev = cell.previousElementSibling; prev; prev = prev.previousElementSibling) {
+      const r = prev.getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      // The poster before it sits at or past its left edge: on the line above.
+      return r.left >= at.left - 1;
+    }
+    return true;
+  };
+  document.addEventListener('focusin', () => {
+    if (leftFrom && !document.activeElement?.closest?.(NAV_SIDE)) leftFrom = null;
+  });
+
   Object.defineProperty(window, '__aioTV', {
     value: Object.freeze({
       down(name, repeat) {
         const el = target();
-        if (name === 'ArrowUp' || name === 'ArrowDown') movedIn = listField(el) ? el : null;
-        else if (name !== 'Enter') movedIn = null;
-        const picks = name === 'Enter' && movedIn === el && listField(el) && highlighted(el);
-        // tvOS has no keyboard for a web page, so the app shows its own.
-        if (name === 'Enter' && isTextField(el) && !picks) {
+        // Back to the card the navigation was opened from.
+        if (name === 'ArrowRight' && !repeat && leftFrom && el.closest?.(NAV_SIDE) && shown(leftFrom)) {
+          const card = leftFrom;
+          leftFrom = null;
+          swallowed = name;
+          focusNav(card);
+          return;
+        }
+        const list = isTextField(el) && listField(el);
+        // tvOS has no keyboard for a web page, so the app shows its own: Enter in a text field,
+        // except on a list's highlighted entry, which it picks; Up from a list's top entry. A
+        // held Up, or presses as quick as its repeats, stays in the list, so running up through
+        // it stops at the top rather than opening the keyboard there.
+        const quick = !!repeat || performance.now() - lastDown < 150;
+        const opens = list
+          ? (name === 'Enter' && !highlightedEntry(el)) || (name === 'ArrowUp' && !quick && atTop(el))
+          : name === 'Enter' && isTextField(el);
+        if (opens) {
           if (repeat) return;
           editing = el;
-          swallowed = true;
+          swallowed = name;
           send({
             type: 'tvos-keyboard',
             value: el.value || '',
@@ -374,18 +547,42 @@ enum BridgeScript {
           });
           return;
         }
+        // Left from the first poster of a grid's line: into the navigation, not up a line.
+        if (name === 'ArrowLeft' && !repeat && inRow(el) && startsGridLine(el)) {
+          const to = navEntry();
+          if (to) {
+            lastDown = performance.now();
+            leftFrom = el;
+            swallowed = name;
+            focusNav(to);
+            return;
+          }
+        }
         // A held key, or presses as quick as one, such as a fast swipe on the clickpad.
         const now = performance.now();
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
-        if (picks) movedIn = null;
         key('keydown', name, repeat);
+        // A scrolled slide runs no animation to wait for, so the artwork sweep is told how long it runs.
+        if (PAGE_SCROLLS && (name === 'ArrowUp' || name === 'ArrowDown'))
+          slidingUntil = Math.max(slidingUntil, performance.now() + 300);
+        // Left from a row's first card that the page left where it was: into the navigation.
+        if (name === 'ArrowLeft' && !repeat && inRow(el)) {
+          const pressed = now;
+          setTimeout(() => {
+            if (lastDown !== pressed || document.activeElement !== el) return;
+            const to = navEntry();
+            if (!to) return;
+            leftFrom = el;
+            focusNav(to);
+          }, 0);
+        }
         // Moves that scroll by transforms alone fire no scroll event.
         soonSweep();
       },
       up(name) {
-        if (name === 'Enter' && swallowed) {
-          swallowed = false;
+        if (name === swallowed) {
+          swallowed = null;
           return;
         }
         key('keyup', name);
@@ -399,8 +596,8 @@ enum BridgeScript {
       done(submit) {
         const el = editing;
         editing = null;
-        // The Enter that opened the keyboard was let go over it, out of the page's sight.
-        swallowed = false;
+        // The key that opened the keyboard was let go over it, out of the page's sight.
+        swallowed = null;
         if (!el || !el.isConnected) return;
         el.dispatchEvent(new Event('change', { bubbles: true }));
         el.focus();

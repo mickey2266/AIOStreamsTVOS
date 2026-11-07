@@ -66,21 +66,21 @@ index 00000000..98858f85
 +  );
 +}
 diff --git a/packages/web/src/pages/item.tsx b/packages/web/src/pages/item.tsx
-index a305b7c5..e184d902 100644
+index b8786c2f..b3a6fdf1 100644
 --- a/packages/web/src/pages/item.tsx
 +++ b/packages/web/src/pages/item.tsx
-@@ -103,6 +103,7 @@ import { useHold } from '../lib/use-hold';
- import { useExternalReturn } from '../lib/playback/external-return';
- import { focusDialog, tab, tabList, useDialogStart } from '../lib/input';
+@@ -110,6 +110,7 @@ import {
+   useDialogStart,
+ } from '../lib/input';
  import { CachedImage } from '../components/cached-image';
 +import { DrawnWash } from '../components/drawn-wash';
  import { TrailerButton } from '../components/trailers';
  import { trailersOf } from '../lib/playback/trailers';
  import { openPartySheet } from '../components/party/party-sheet';
-@@ -222,7 +223,26 @@ function Backdrop({
-   const src = sources[attempt];
-   const loaded = !!src && loadedSrc === src;
-   const wash = attempt >= images.length;
+@@ -244,7 +245,33 @@ function Backdrop({
+     },
+     [src]
+   );
 -  const image = src && (
 +  const fail = () =>
 +    setFailed((f) => ({
@@ -94,14 +94,21 @@ index a305b7c5..e184d902 100644
 +      data-ui="item-backdrop-image"
 +      data-wash
 +      src={src}
-+      onLoad={() => setLoadedSrc(src)}
++      onLoad={() =>
++        setArrived((was) =>
++          was?.src === src
++            ? was
++            : { src, late: performance.now() - opened > UNSEEN_MS }
++        )
++      }
 +      onError={fail}
 +      className={cn(
-+        'absolute inset-0 h-full w-full scale-125 object-cover transition-opacity duration-700',
++        'absolute inset-0 h-full w-full scale-125 object-cover',
++        loaded && arrived.late && 'transition-opacity duration-700',
 +        loaded ? 'opacity-50' : 'opacity-0'
 +      )}
 +    />
 +  ) : src && (
      <CachedImage
        key={src}
-       data-ui="item-backdrop-image"
+       ref={held}

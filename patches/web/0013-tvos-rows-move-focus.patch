@@ -1,0 +1,18 @@
+diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/components/media-row.tsx
+--- a/packages/web/src/components/media-row.tsx
++++ b/packages/web/src/components/media-row.tsx
+@@ -244,8 +244,12 @@ const savedScroll = new Map<string, number>();
+ /** The room after a focused card in a TV row; a card's padding leaves the room before. */
+ const ROOM = 16;
+ 
+-/** Keys, a remote or a gamepad keep focus where a row's first card starts, until its end. */
+-const anchored = () => !!keyboardFocus();
++/**
++ * Keys and a gamepad keep focus where a row's first card starts, until its end.
++ * On a TV the remote moves focus along the row as a pointer does, and the row
++ * scrolls only when the next card would leave the screen (AIOStreamsTVOS).
++ */
++const anchored = () => !!keyboardFocus() && !currentHost().tv;
+ 
+ /**
+  * A TV's or touch screen's row: a plain scroller, as Embla's measuring and

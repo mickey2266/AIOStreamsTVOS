@@ -7,12 +7,21 @@ import PackageDescription
  * its FFmpeg build with it, and the app is tested against one.
  *
  * The commit is on the app's fork (mickey2266/AetherEngine, branch
- * `aiostreams-7.57`): upstream 7.57.0 plus one fix. The engine's software
- * player (interlaced H.264 and the like) labelled 7.1 MPEG_7_1_C, which put
- * the side and rear surrounds in each other's speakers; it now labels it
- * WAVE_7_1 (Dolby's TrueHD 7.1 channel check on a Samsung HW-Q990F). The
- * AVPlayer route's FLAC bridge was right as upstream has it. Back to an
- * upstream version once that fix is released there.
+ * `aiostreams-7.57`): upstream 7.57.0 plus the fork's own commits.
+ * - 053d4e4e: the engine's software player (interlaced H.264 and the like)
+ *   labelled 7.1 MPEG_7_1_C, which put the side and rear surrounds in each
+ *   other's speakers; it now labels it WAVE_7_1 (Dolby's TrueHD 7.1 channel
+ *   check on a Samsung HW-Q990F). The AVPlayer route's FLAC bridge was right
+ *   as upstream has it.
+ * - a07c7c5c: for remuxes, a 64 MB read-ahead window and 128 MB ranges (were
+ *   16 MB and 32 MB); a connection the reader waits on for 8 s below the
+ *   video's mean rate is replaced (3 in a row, then the check rests 2
+ *   minutes); `confirmsAtmosOnHeldSourceConnection`, so the Atmos
+ *   confirmation runs on the held connection the app uses by default.
+ * - 47c4e653: the silent Atmos stream the engine plays beside a rendered
+ *   TrueHD Atmos or DTS:X bed stops while the picture-in-picture window
+ *   shows, as the bed played nothing in the window beside it.
+ * Back to an upstream version once those are released there.
  *
  * TrueHD Atmos and DTS:X object rendering (`TrueHDObjectAudio`,
  * `DTSXObjectAudio`) are built in, for the page's Object audio switch (off by
@@ -28,7 +37,7 @@ let package = Package(
         .library(name: "AetherHost", targets: ["AetherHost"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "053d4e4e05b43d1e83fe8346c92555dbc8690d27",
+        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "47c4e653f515ea7fad811fdab959a57e287de9f4",
                  traits: ["TrueHDObjectAudio", "DTSXObjectAudio"]),
     ],
     targets: [

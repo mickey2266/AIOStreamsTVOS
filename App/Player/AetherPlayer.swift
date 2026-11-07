@@ -71,12 +71,15 @@ final class AetherPlayer {
     /**
      * One connection to the source, read as playback needs it, instead of
      * ranged requests that end when the read-ahead fills and open again as it
-     * drains (`LoadOptions.heldSourceConnection`). HTTP/1.1 only. Set from the
-     * app menu; a file opens with the setting it finds, so it applies from
-     * the next video.
+     * drains (`LoadOptions.heldSourceConnection`). HTTP/1.1 only. On by
+     * default: ranged requests start again at least every 128 MB, every
+     * dozen seconds of a remux, each waiting for the source's first byte, and
+     * more often once the buffer is full and the read-ahead drains. Set from
+     * the app menu, where a choice made before stays; a file opens with the
+     * setting it finds, so it applies from the next video.
      */
     static var heldSourceConnection: Bool {
-        get { UserDefaults.standard.bool(forKey: "player.heldSourceConnection") }
+        get { UserDefaults.standard.object(forKey: "player.heldSourceConnection") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "player.heldSourceConnection") }
     }
 
@@ -172,7 +175,11 @@ final class AetherPlayer {
         options.autoplay = !paused
         options.preferredAudioLanguages = request.audioLanguages
         // Matching tracks are confirmed as Atmos in the background, for the track names and the statistics.
+        // The engine would skip the pass on a held source connection (the default here), which it reads
+        // as an origin that refuses a second request. This app holds it for throughput, and debrid and
+        // Jellyfin sources take a second request, so the pass runs on its own handle either way.
         options.confirmAtmos = true
+        options.confirmsAtmosOnHeldSourceConnection = true
         if let manager = view.window?.avDisplayManager {
             options.matchContentEnabled = manager.isDisplayCriteriaMatchingEnabled
         }
@@ -213,12 +220,22 @@ final class AetherPlayer {
         // played behind it in the same space, so a seek back is at once. The window is the engine's
         // whole-source opt-in, bounded by those bytes (`PrefetchDiskBudget`) rather than a count of
         // segments, as the file's bitrate isn't known before it opens. It stays at least 10 segments
-        // (~40 s) ahead whatever the size, and a quarter of the free space caps it. Automatic keeps
-        // the engine's own: ~40 s ahead and up to 2 GiB behind. The engine's software player keeps its
-        // packets in memory on tvOS, 96 MB ahead and 128 MB behind, and the size changes nothing there.
+        // (~40 s) ahead whatever the size, and a quarter of the free space caps it.
+        // Automatic buffers 10 minutes ahead, which a remux needs to ride out a slow stretch of the
+        // source: about 6 GB at 80 Mbit/s. The engine's own automatic (~40 s ahead) is a few hundred
+        // MB of a remux, gone in one hiccup. The bytes are left to the engine's quarter of the free
+        // space, so a fuller Apple TV buffers less than 10 minutes rather than filling up. The
+        // engine's software player keeps its packets in memory on tvOS, 96 MB ahead and 128 MB
+        // behind, and neither changes anything there.
         if settings.cacheMb > 0 {
             options.forwardBufferSegments = Self.cacheWindowSegments
             options.sessionCacheByteBudget = settings.cacheMb * 1_000_000
+        } else {
+            options.forwardBufferSegments = Self.automaticWindowSegments
+            // Without a budget, a window of 150 or fewer keeps the engine's 2 GiB cap, under 4 minutes
+            // of a remux. Asking for more than any Apple TV holds leaves only the quarter-of-free-space
+            // cap; 1 TiB rather than Int.max, so nothing the engine adds to it can overflow.
+            options.sessionCacheByteBudget = 1 << 40
         }
         options.heldSourceConnection = Self.heldSourceConnection
         openedHeld = options.heldSourceConnection
@@ -233,6 +250,8 @@ final class AetherPlayer {
     /// The engine's largest forward window (about 3 hours of 4 s segments): with a Cache size set, the
     /// bytes bound the buffer, not this.
     private static let cacheWindowSegments = 2700
+    /// Automatic's forward window: 10 minutes of the engine's 4 s segments.
+    private static let automaticWindowSegments = 150
 
     /// The page's channel limit, dialogue boost and night mode. Shaping needs the decoded sound, so any of them
     /// costs passthrough and Atmos; 7.1 and Automatic with no boost and night mode off shape nothing.

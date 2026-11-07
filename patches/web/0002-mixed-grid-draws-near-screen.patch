@@ -2,7 +2,7 @@ diff --git a/packages/web/src/components/mixed-grid.tsx b/packages/web/src/compo
 index 2cacc585..6de047bf 100644
 --- a/packages/web/src/components/mixed-grid.tsx
 +++ b/packages/web/src/components/mixed-grid.tsx
-@@ -1,13 +1,121 @@
+@@ -1,13 +1,122 @@
 +import React from 'react';
  import { Skeleton } from '@aiostreams/ui/skeleton';
  import type { JellyfinClient } from '../lib/client';
@@ -16,12 +16,13 @@ index 2cacc585..6de047bf 100644
  import { CardGrid, fadeIn } from './media-row';
  
 +/**
-+ * Cards this near the screen are drawn; further out each holds its place
-+ * empty. Far enough ahead that a card mounting during a scroll is done
-+ * before it's in sight.
++ * Cards within a screen's height of the screen are drawn; further out each
++ * holds its place empty. A TV's grid runs 10 or 12 across, and 2.5 screens
++ * each way kept 300 or more cards mounted; a held key's scroll trails focus
++ * by half a row, so one screen still mounts a row long before it's in sight.
 + */
 +// eslint-disable-next-line lingui/no-unlocalized-strings -- a root margin
-+const DRAWN_MARGIN = '250% 0px';
++const DRAWN_MARGIN = '100% 0px';
 +/** Drawn before they're first measured, so a grid's first screen shows at once. */
 +const FIRST_DRAWN = 30;
 +
@@ -124,7 +125,7 @@ index 2cacc585..6de047bf 100644
  /** Cards in the shape their art was made for; collections may be landscape. */
  export function MixedGrid({
    items,
-@@ -18,6 +126,7 @@ export function MixedGrid({
+@@ -18,6 +127,7 @@ export function MixedGrid({
    client: JellyfinClient;
    loading?: boolean;
  }) {
@@ -132,7 +133,7 @@ index 2cacc585..6de047bf 100644
    const landscape =
      items.length > 0 &&
      items.filter((i) => cardShape(i) === 'landscape').length > items.length / 2;
-@@ -28,30 +137,14 @@ export function MixedGrid({
+@@ -28,30 +138,14 @@ export function MixedGrid({
            <Skeleton key={i} className="aspect-[2/3] h-auto w-full rounded-lg" />
          ))}
        {items.map((child, i) => (

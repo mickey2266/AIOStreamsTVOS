@@ -1,0 +1,132 @@
+diff --git a/packages/web/src/lib/input/glide.ts b/packages/web/src/lib/input/glide.ts
+index 5ac94525..6acd8680 100644
+--- a/packages/web/src/lib/input/glide.ts
++++ b/packages/web/src/lib/input/glide.ts
+@@ -240,6 +240,44 @@ export function glideTo(box: Element, left: number, top: number): void {
+   frame ||= requestAnimationFrame(step);
+ }
+ 
++/**
++ * The longest work waits for scrolls to end: a held key keeps one running,
++ * and what waits must still come in time (AIOStreamsTVOS).
++ */
++const STILL_MOST_MS = 700;
++const stillWaiting = new Set<() => void>();
++
++/**
++ * Runs `run` once no keyed scroll is under way, or after `STILL_MOST_MS`.
++ * A scroll eased frame by frame stalls on any long task, so work that can
++ * wait, such as mounting a row's cards, waits for it to stop.
++ */
++export function whenStill(run: () => void): () => void {
++  let done = false;
++  const go = () => {
++    if (done) return;
++    done = true;
++    stillWaiting.delete(go);
++    clearTimeout(timer);
++    run();
++  };
++  const timer = setTimeout(go, glides.size ? STILL_MOST_MS : 0);
++  if (glides.size) stillWaiting.add(go);
++  return () => {
++    done = true;
++    stillWaiting.delete(go);
++    clearTimeout(timer);
++  };
++}
++
++/** After the frame the last scroll ended in, so it's drawn first. */
++function wakeStill(): void {
++  if (!stillWaiting.size) return;
++  const waiting = [...stillWaiting];
++  stillWaiting.clear();
++  setTimeout(() => waiting.forEach((go) => go()));
++}
++
+ /** Where `box` ends up once a scroll under way finishes. */
+ export const headedTo = (box: Element): [number, number] =>
+   glides.get(box)?.to ?? [box.scrollLeft, box.scrollTop];
+@@ -289,4 +327,5 @@ function step(now: number): void {
+     }
+   }
+   if (glides.size) frame = requestAnimationFrame(step);
++  else wakeStill();
+ }
+diff --git a/packages/web/src/pages/home.tsx b/packages/web/src/pages/home.tsx
+index f9edd54b..3c42229a 100644
+--- a/packages/web/src/pages/home.tsx
++++ b/packages/web/src/pages/home.tsx
+@@ -41,6 +41,7 @@ import { href, itemPath, navigate, to, versionsPath } from '../lib/paths';
+ import { settings, useSetting, type FeaturedSource } from '../lib/settings';
+ import { useFeature } from '../lib/server-info';
+ import { useNear } from '../lib/use-in-view';
++import { whenStill } from '../lib/input/glide';
+ import { FollowHero, Hero } from '../components/hero';
+ import { CardPreviewHost } from '../components/card-preview';
+ import { MediaRow } from '../components/media-row';
+@@ -336,6 +337,24 @@ function UpcomingRow() {
+ 
+ const ROW_PAGE = 20;
+ 
++/** How far below the screen a TV starts a library row: a screen's height. */
++// eslint-disable-next-line lingui/no-unlocalized-strings -- a root margin
++const TV_ROW_AHEAD = '100% 0px';
++
++/**
++ * `value`, changed only while the page isn't scrolling: a TV eases its
++ * scroll frame by frame, and a row's twenty cards mounting at once stall a
++ * frame or more of it (AIOStreamsTVOS).
++ */
++function useStill<T>(value: T): T {
++  const [shown, setShown] = React.useState(value);
++  React.useEffect(() => {
++    if (Object.is(shown, value)) return;
++    return whenStill(() => setShown(() => value));
++  }, [value, shown]);
++  return shown;
++}
++
+ /** Favourite channels, then those played here lately, with what is on. */
+ function LiveRow() {
+   const view = useLiveTvView();
+@@ -392,17 +411,23 @@ function LiveRow() {
+  */
+ function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
+   const { client } = useSession();
+-  const [ref, near] = useNear<HTMLElement>('400px', first);
++  // A TV starts a row a screen ahead, so it's drawn between presses rather than as it scrolls in.
++  const [ref, nearNow] = useNear<HTMLElement>(
++    currentHost().tv ? TV_ROW_AHEAD : '400px',
++    first
++  );
++  const near = useStill(nearNow);
+   const pages = useItemPages(view.Id!, {
+     types: libraryTypes(view),
+     recursive: true,
+     pageSize: ROW_PAGE,
+     enabled: near,
+   });
+-  const items = React.useMemo(
++  const fetched = React.useMemo(
+     () => pages.data?.pages.flatMap((p) => p.Items ?? []) ?? [],
+     [pages.data]
+   );
++  const items = useStill(fetched);
+   const landscape =
+     items.length > 0 &&
+     items.filter((i) => cardShape(i) === 'landscape').length > items.length / 2;
+@@ -460,7 +485,12 @@ function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
+         </Anchor>
+       }
+       shape={landscape ? 'wide' : 'poster'}
+-      loading={!near || (!pages.data && !pages.isError)}
++      loading={
++        !near ||
++        (!pages.data && !pages.isError) ||
++        // Fetched, its cards waiting for a scroll to end.
++        (!items.length && fetched.length > 0)
++      }
+       waiting={!near}
+       loadingMore={isFetchingNextPage}
+       onEndReached={more}

@@ -1,6 +1,6 @@
 # Builds the app for Apple TV hardware, unsigned, and packs it as an .ipa.
 # Every run attaches it as an artifact; a push to main, or a run started by
-# hand on main, also replaces the rolling "nightly" release, and a v* tag
+# hand on any branch, also replaces the rolling "nightly" release, and a v* tag
 # publishes a release of its own.
 # The .ipa has to be signed with your own Apple ID before an Apple TV installs it.
 name: Build
@@ -53,7 +53,11 @@ jobs:
           path: build/SourcePackages
           key: spm-${{ hashFiles('Packages/AetherHost/Package.swift', 'project.yml') }}
 
+      # CFBundleVersion is this workflow's run number, so every build is a newer one than the last,
+      # for the app and its Top Shelf extension alike: a setting given here applies to every target.
       - name: Build for Apple TV
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           xcodebuild build \
             -project AIOStreamsTV.xcodeproj \
@@ -61,16 +65,27 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=tvOS' \
             -derivedDataPath build \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
       - name: Pack the .ipa
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           app="build/Build/Products/Release-appletvos/AIOStreams.app"
           test -d "$app" || { echo "No app at $app"; ls -R build/Build/Products; exit 1; }
           shelf="$app/PlugIns/AIOStreamsTopShelf.appex"
           test -d "$shelf" || { echo "No Top Shelf extension at $shelf"; exit 1; }
+          # tvOS takes an install as an update only with a higher CFBundleVersion, the extension's matching the app's.
+          plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Info.plist"; }
+          echo "App $(plist "$app" CFBundleShortVersionString) ($(plist "$app" CFBundleVersion)), Top Shelf $(plist "$shelf" CFBundleShortVersionString) ($(plist "$shelf" CFBundleVersion))"
+          test "$(plist "$app" CFBundleVersion)" = "$BUILD_NUMBER" \
+            || { echo "The app's CFBundleVersion isn't the run number $BUILD_NUMBER"; exit 1; }
+          test "$(plist "$shelf" CFBundleVersion)" = "$(plist "$app" CFBundleVersion)" \
+            && test "$(plist "$shelf" CFBundleShortVersionString)" = "$(plist "$app" CFBundleShortVersionString)" \
+            || { echo "The Top Shelf extension's version doesn't match the app's"; exit 1; }
           # AetherEngine's FFmpeg is dynamic frameworks in the app; without them nothing plays.
           ls "$app/Frameworks" | grep -q '^AetherLibavcodec.framework$' \
             || { echo "No AetherLibavcodec.framework in $app/Frameworks"; ls -la "$app/Frameworks" || true; exit 1; }
@@ -96,9 +111,11 @@ jobs:
           path: AIOStreams.ipa
           if-no-files-found: error
 
-      # A push to main, or a run started by hand on main (whichever AIOStreams ref it built).
+      # A push to main, or any run started by hand, on whichever branch it was started on (and
+      # whichever AIOStreams ref it built). A tag run started by hand publishes its tagged release
+      # below instead.
       - name: Publish the nightly release
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/'))
         env:
           GH_TOKEN: ${{ github.token }}
           AIOSTREAMS_REF: ${{ inputs.aiostreams_ref || 'main' }}
@@ -106,7 +123,7 @@ jobs:
           gh release delete nightly --yes --cleanup-tag || true
           gh release create nightly AIOStreams.ipa \
             --title "Nightly" \
-            --notes "Unsigned build of ${GITHUB_SHA::8}, with the web app from AIOStreams ${AIOSTREAMS_REF}. Sign it with your own Apple ID to install." \
+            --notes "Unsigned build of ${GITHUB_SHA::8} from ${GITHUB_REF_NAME}, with the web app from AIOStreams ${AIOSTREAMS_REF}. Sign it with your own Apple ID to install." \
             --prerelease \
             --target "$GITHUB_SHA"
 
@@ -125,6 +142,8 @@ jobs:
       # token starts no other run, so this doesn't rebuild the nightly.
       - name: Add the release to the AltStore source
         if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           git fetch --depth 1 origin main
           git checkout -B main origin/main

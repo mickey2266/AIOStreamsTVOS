@@ -24,7 +24,8 @@ lasts 7 days, with a paid developer account a year.
   installs to an Apple TV.
 - **By hand**: download `AIOStreams.ipa` from the latest
   [release](https://github.com/mickey2266/AIOStreamsTVOS/releases/latest), or the **Nightly**
-  prerelease for the newest build of `main`, and open it in your sideloading tool.
+  prerelease for the newest build of `main` or of a branch built by hand (its notes name which), and
+  open it in your sideloading tool.
 
 Then sign in to your Jellyfin server in the app, as in AIOStreams' web app. For Dolby Atmos, set
 the Apple TV's **Settings → Video and Audio → Audio Format** to **Auto**, and keep **Continuous
@@ -98,8 +99,11 @@ PCM and never Atmos.
   TrueHD Atmos or DTS:X track over another format in the same language. The statistics' Object
   audio line shows the bed and the objects playing. On the engine's software player (below) the
   same engine setting also hands an E-AC-3 Atmos track to tvOS's renderer compressed, which
-  played nothing when tried (de850fa), so that case may be silent with the switch on. Not yet
-  tried on a receiver.
+  played nothing when tried (de850fa), so that case may be silent with the switch on. In the
+  picture-in-picture window the silent Dolby Atmos stream the engine plays beside a rendered bed,
+  so a receiver shows Atmos (`AtmosOutputActivator`), stops: with it, the bed played nothing in the
+  window, with or without a display mode switch. Some receivers may show multichannel PCM rather
+  than Atmos for the window. Not yet tried on a receiver.
 - **What turns Atmos off**: the page's Audio channels set to Stereo or 5.1 (the engine decodes the
   sound to fit), and any output but HDMI, which alone carries Dolby MAT: Bluetooth gets a stereo
   mix, AirPods a spatial render. So does video the engine decodes itself (AV1, which no Apple TV
@@ -177,9 +181,13 @@ When a video freezes or falls behind its sound, the same report has the playback
 buffer held ahead (and its lowest in the last 30 s), stalls, dropped frames, the rate the video
 plays at against what the source delivered, and producer restarts. A buffer that runs dry with
 the source below the video's rate is the network; a full buffer with frames dropping is the
-picture falling behind. The menu's **Hold one source connection** reads the source over one
-connection instead of ranged requests (AetherEngine's `heldSourceConnection`, HTTP/1.1 only),
-from the next video.
+picture falling behind. The source is read over one held connection by default (AetherEngine's
+`heldSourceConnection`, HTTP/1.1 only), rather than ranged requests that start again at least
+every 128 MB, every dozen seconds of a remux. Either way, a connection that runs below the video's
+average rate for 8 seconds while the player waits on it is replaced by a new one (three in a row,
+then it rests two minutes), as debrid CDNs often slow one connection and serve a new one at full
+speed. The menu's **Use ranged source requests** switches back,
+from the next video, and **Hold one source connection** returns to the default.
 
 The menu's **Play a test video…** plays an http(s) link you type (a file or an HLS playlist; the
 last one is remembered) in the page's own player, with its controls, track menus, statistics and
@@ -364,6 +372,14 @@ Back behaviour and the bundled-player path. It also means:
 - Settings → **Donate** lists the GitHub Sponsors and Ko-fi links as text
   (`https://github.com/sponsors/Viren070`, `https://ko-fi.com/Viren070`) rather than buttons that
   open them, as a TV has no browser to open them in (`patches/web/0011-tvos-donate-shows-links.patch`).
+- On a TV, the remote moves focus along a row of posters and the row scrolls only when the next
+  poster would leave the screen, rather than the focus staying where the row's first poster starts
+  while the row slides under it (`patches/web/0013-tvos-rows-move-focus.patch`). Keys and a
+  gamepad elsewhere keep the page's own behaviour.
+- A keyed move up or down eases the page's scroll position itself, frame by frame, rather than
+  jumping and easing the whole page back as one layer its height, which juddered on an Apple TV even
+  on the settings page (`patches/web/0014-tvos-scrolls-can-skip-layers.patch`). Rows across keep
+  their eased layers.
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.
@@ -374,18 +390,21 @@ Back behaviour and the bundled-player path. It also means:
   engine setting isn't Automatic, does nothing.
 - **Cache size** (Settings → Playback → Player) sizes the engine's buffer: with a size picked, it
   buffers ahead until the cache holds that much, at least about 40 seconds and at most a quarter of
-  the free space, and keeps what played in the same space for seeking back. Automatic keeps the
-  engine's own (about 40 seconds ahead). It applies from the next video, and only to video AVPlayer
-  plays: the engine's software player keeps a fixed 96 MB ahead and 128 MB behind in memory.
+  the free space, and keeps what played in the same space for seeking back. Automatic buffers 10
+  minutes ahead (about 6 GB of an 80 Mbit/s remux), or as much as a quarter of the free space holds
+  if that's less, so a remux rides out a slow stretch of the source; the picked sizes, 1000 MB at
+  most, hold less. It applies from the next video, and only to video AVPlayer plays: the engine's
+  software player keeps a fixed 96 MB ahead and 128 MB behind in memory.
 
 ## The remote
 
 | Siri Remote                         | Does                                              |
 | ----------------------------------- | ------------------------------------------------- |
-| Clickpad edges / swipe              | Arrow keys (held edges repeat)                    |
+| Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe up or down moves one row, or two when it's long; across, it moves as many posters as its length; an edge the swipe starts or ends on adds no arrow of its own; Left from a row's or a grid line's first poster opens the navigation)|
 | Click                               | Enter (held, the page's hold actions)             |
 | Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
-| Click in a searchable list          | Such as Discover's catalog picker: after moving through it with Up or Down, picks the highlighted entry; straight away, opens the keyboard to search |
+| Click in a searchable list          | The pickers with up and down carets, such as Discover's catalog picker: picks the highlighted entry, including the one highlighted as the list opens or after a search; opens the keyboard only when nothing is left to pick |
+| Up from a searchable list's top entry | Opens the keyboard to search (a held Up, or a quick run of presses, stops at the top instead) |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
 | **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), play a test video from a link, reload, switch the source connection, turn the Dolby primer on or off, or reset the app's data |
@@ -407,7 +426,8 @@ to the page; the page saves where you stopped.
 ## Building
 
 The GitHub Actions workflow builds an unsigned `AIOStreams.ipa` for Apple TV hardware. Every run
-attaches it as an artifact, each push to `main` replaces the **Nightly** release, and a `v*` tag
+attaches it as an artifact, each push to `main` and each run started by hand (Actions → Build →
+Run workflow, on any branch) replaces the **Nightly** release, and a `v*` tag
 publishes a release of its own. Sign it with your own Apple ID using a sideloading tool that
 handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid account a year.
 

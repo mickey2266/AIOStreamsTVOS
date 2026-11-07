@@ -1,0 +1,29 @@
+diff --git a/packages/web/src/lib/images.ts b/packages/web/src/lib/images.ts
+index f091cc34..7331a735 100644
+--- a/packages/web/src/lib/images.ts
++++ b/packages/web/src/lib/images.ts
+@@ -24,6 +24,12 @@ function deviceWidth(css: number): number {
+ const RESOLUTIONS = [1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
+ /** As decoding bigger artwork stutters a TV. */
+ const TV_MAX_RATIO = 2;
++/**
++ * The widest picture a TV asks for, in device pixels. A full-screen backdrop
++ * at a 4K TV's 3840 decodes to 32 MB, and the Apple TV's web process is ended
++ * for memory with a few of them held; at 1920 it's 8 MB (AIOStreamsTVOS).
++ */
++const TV_MAX_PX = 1920;
+ 
+ /** Amazon's WebView reports twice its ratio, which CSS resolution gets right. */
+ function resolution(reported: number): number {
+@@ -52,7 +58,10 @@ function drawn() {
+       ratio: currentHost().tv
+         ? Math.min(TV_MAX_RATIO, (screen.width * dppx) / innerWidth || dppx)
+         : dppx,
+-      screenPx: Math.max(screen.width, screen.height) * dppx || Infinity,
++      screenPx: Math.min(
++        Math.max(screen.width, screen.height) * dppx || Infinity,
++        currentHost().tv ? TV_MAX_PX : Infinity
++      ),
+     };
+   }
+   return measured;
