@@ -318,18 +318,33 @@ again.
 - The extension needs a profile of its own, for an App ID under the app's with the same App Group.
   A certificate with one explicit profile signs both with the app's App ID, and tvOS doesn't run
   the extension then.
+- The extension links with `-e _NSExtensionMain` (`project.yml`). On Xcode's own entry point it
+  exits as tvOS starts it on tvOS 27.2, and the Top Shelf shows only its image. With this one, an
+  update sent while the app sat in the top row once failed with "Connection refused (os error 61)";
+  builds then all had the same build number, and each now has its own. If an update fails that way,
+  move the app out of the top row, update, and move it back.
 
-### Artwork size
+### Memory
 
-The page asks for artwork at its device pixel ratio, which tvOS reports as 2 on a 4K TV, and
-4K-wide backdrops ran WebKit's process out of memory while browsing. The bridge script reports a
-ratio of 1, so artwork comes at 1080p sizes, as tvOS's own apps draw it. The app menu (hold
-Play/Pause) shows the app's memory and when the page last reloaded.
+tvOS ends WebKit's web content process when it holds too much, and the page then loads again. What
+kept that from happening while browsing:
 
-Scrolling fast through the home and discover pages ran it out of memory too, most likely because
-the page slides the whole page in layers for each key press, and a held key's repeats kept
-several slides running. The bridge script lets a held key's repeats, and presses as quick as them,
-jump to each row instead; a single press still slides.
+- **Artwork size.** The page sizes artwork from the screen, which on a 4K TV asked for 3840-wide
+  backdrops, 32 MB each once decoded. A TV now asks for no picture wider than 1920 pixels
+  (`patches/web/0015-tvos-pictures-at-most-1920-wide.patch`), so a backdrop is 1920×1080 at most,
+  8 MB, as tvOS's own apps draw them. The bridge script also reports a device pixel ratio of 1.
+- **Cards near the screen only.** Long rows and the Discover grid draw only the cards near the screen
+  and hold the others' places empty (patches 0001 and 0002); the grid draws within one screen's
+  height above and below. A grid is 10 or 12 posters across on a TV, so a wider margin kept 300 or
+  more cards mounted.
+- **Pictures let go of.** The bridge script swaps a picture more than three screens away (cards'
+  artwork, backdrops and logos) for a blank one, which lets WebKit drop its decoded copy, and puts
+  it back within two. It does the same for every picture on a page kept out of sight: the home page,
+  kept under every other page, and the whole page while the player shows. They come back as that
+  page is drawn again. When tvOS warns of low memory, it lets go of all but a little past the screen.
+
+The app menu (hold Play/Pause) shows the app's memory, the pictures, cards and elements the page
+holds, and, when the page's process was ended, what it held just before.
 
 Two more of the bridge script's switches, set while chasing those memory kills, are still off:
 
@@ -338,6 +353,8 @@ Two more of the bridge script's switches, set while chasing those memory kills, 
   opening its version picker, which draws its backdrop under two masks or a poster under a blur
   across most of the screen. Edges that would fade end sharply, and blurred washes are plain.
   The few washes the page needs are drawn once on a tiny canvas instead (patches 0004 and 0005).
+  The one exception: with the page's **Blur episodes you haven't started** on (Settings →
+  Interface → Spoilers), the episode pictures and text it blurs keep their filters.
 - **`LAYERS`**: nothing kept as a layer at rest (`will-change`), except the glide layers the slides
   use, and loading placeholders hold still instead of pulsing. The rotating hero kept several
   full-screen backdrops as standing layers, about 33 MB each at the TV's 2x.
@@ -376,10 +393,17 @@ Back behaviour and the bundled-player path. It also means:
   poster would leave the screen, rather than the focus staying where the row's first poster starts
   while the row slides under it (`patches/web/0013-tvos-rows-move-focus.patch`). Keys and a
   gamepad elsewhere keep the page's own behaviour.
-- A keyed move up or down eases the page's scroll position itself, frame by frame, rather than
-  jumping and easing the whole page back as one layer its height, which juddered on an Apple TV even
-  on the settings page (`patches/web/0014-tvos-scrolls-can-skip-layers.patch`). Rows across keep
-  their eased layers.
+- A keyed move up or down scrolls the page rather than jumping and easing the whole page back as one
+  layer its height, which juddered on an Apple TV even on the settings page
+  (`patches/web/0014-tvos-scrolls-can-skip-layers.patch`). The scroll is WebKit's own smooth scroll
+  (`patches/web/0017-tvos-webkit-smooth-scrolls.patch`): the page's own easing set the scroll
+  position from the page's thread every frame, so any long task there, such as a row's cards
+  mounting, stalled it. `NATIVE_SCROLLS` in `App/Web/BridgeScript.swift` set to `false` goes back to
+  the page's easing. Rows across keep their eased layers.
+- The home page's library rows start loading a screen before they come into view, and add their
+  cards only once a scroll has stopped, or after 0.7 seconds of a held key
+  (`patches/web/0016-tvos-home-rows-draw-between-scrolls.patch`), rather than all twenty at once in
+  the middle of one.
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.
@@ -435,9 +459,16 @@ handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid a
 
 Tagged releases are listed in the AltStore-format source in `altstore/source.json` (see
 Installing). The build workflow adds
-every `v*` release to the source (`scripts/update-source.py`, the version and build from
-`project.yml`), so a release is tagged after `MARKETING_VERSION` is bumped to match. The nightly
-isn't listed.
+every `v*` release to the source (`scripts/update-source.py`: the version from `project.yml`'s
+`MARKETING_VERSION`, the build the workflow's run number), so a release is tagged after
+`MARKETING_VERSION` is bumped to match. The nightly isn't listed.
+
+Each CI build's `CFBundleVersion` is the workflow's run number, for the app and its Top Shelf
+extension alike, so every build installs as a newer one than the last; the pack step fails if the two
+differ. The engine's prebuilt FFmpeg frameworks come with `MinimumOSVersion` 26.0 in their
+Info.plists, though their binaries are built for tvOS 16, and tvOS checks every bundle's as the app
+installs, so the pack step gives them the app's 18.0 and fails if any bundle asks for a newer tvOS
+than the app. 1.1.0's frameworks still said 26.0, so it didn't install below tvOS 26.
 
 On a Mac with Xcode 27 (AetherEngine supports no older one), [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 and Node 22+, for tvOS 18 or later:
@@ -449,10 +480,15 @@ open AIOStreamsTV.xcodeproj     # Xcode fetches AetherEngine and its FFmpeg buil
 ```
 
 The engine is pinned to one commit in `Packages/AetherHost/Package.swift`: upstream AetherEngine 7.57.0
-plus one fix on the app's fork ([mickey2266/AetherEngine](https://github.com/mickey2266/AetherEngine),
-branch `aiostreams-7.57`): the engine's software player, which plays interlaced H.264 among others,
-labels its 7.1 as CoreAudio's WAVE_7_1, so the side and rear surrounds play from their own speakers
-instead of each other's. Lossless surround (TrueHD, DTS-HD) reaches AVPlayer as FLAC. Its FFmpeg comes as
+plus the app's fork's own commits ([mickey2266/AetherEngine](https://github.com/mickey2266/AetherEngine),
+branch `aiostreams-7.57`, each described there):
+- the engine's software player, which plays interlaced H.264 among others, labels its 7.1 as
+  CoreAudio's WAVE_7_1, so the side and rear surrounds play from their own speakers instead of each
+  other's;
+- remuxes read 64 MB ahead in 128 MB ranges, a connection running below the video's rate is
+  replaced, and the Atmos confirmation runs on the held source connection;
+- the silent Atmos stream beside a rendered TrueHD Atmos or DTS:X bed stops while the
+  picture-in-picture window shows. Lossless surround (TrueHD, DTS-HD) reaches AVPlayer as FLAC. Its FFmpeg comes as
 dynamic frameworks that Xcode embeds in the app; nothing else in the app may bring an FFmpeg of its
 own, or it takes the engine's symbols.
 
@@ -464,7 +500,8 @@ rows and in grids, so a long scroll doesn't keep every card it passed, and save 
 two pages on the device, so one scrolled far doesn't come back with every page at once. A collection
 without landscape art, and each server's card, get their blurred wash drawn once on a tiny canvas
 instead of through a CSS blur, which the TV would otherwise draw again on every frame anything over it
-moves. The **Upstream settings watch** workflow (`.github/workflows/upstream-settings-watch.yml`)
+moves. The rest are described above: the 1920-pixel artwork limit (Memory), and the TV's names,
+hidden settings, focus, scrolling and home rows (Posing as the Android TV app). The **Upstream settings watch** workflow (`.github/workflows/upstream-settings-watch.yml`)
 checks upstream every Monday and keeps one issue open while its Android app settings
 (`pages/settings/apps.tsx` and the section list in `pages/settings/index.tsx`) differ from the
 commit in `.github/upstream-watch/settings-baseline`; put upstream's newest commit there once
