@@ -376,10 +376,10 @@ Back behaviour and the bundled-player path. It also means:
   poster would leave the screen, rather than the focus staying where the row's first poster starts
   while the row slides under it (`patches/web/0013-tvos-rows-move-focus.patch`). Keys and a
   gamepad elsewhere keep the page's own behaviour.
-- The app menu's **Slide the page by scrolling** switch: a keyed move up or down eases the page's
-  scroll position itself, frame by frame, rather than jumping and easing the whole page back as one
-  layer its height, to see which judders less on an Apple TV (`patches/web/0014-tvos-scrolls-can-skip-layers.patch`).
-  Rows across keep their eased layers. The page loads again to take it up.
+- A keyed move up or down eases the page's scroll position itself, frame by frame, rather than
+  jumping and easing the whole page back as one layer its height, which juddered on an Apple TV even
+  on the settings page (`patches/web/0014-tvos-scrolls-can-skip-layers.patch`). Rows across keep
+  their eased layers.
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.

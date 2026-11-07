@@ -145,8 +145,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             version: "\(Identity.version)-tvos",
             device: Identity.device,
             deviceId: Identity.deviceId,
-            storage: storage.json,
-            pageScrolls: BridgeScript.pageScrolls
+            storage: storage.json
         ))
         let ours = url.flatMap { $0.scheme?.lowercased() == WebApp.scheme ? $0 : nil }
         // `loadURL:` in Objective-C; Swift names it `load(_:)`.
@@ -334,19 +333,9 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines += TopShelf.report
         let held = AetherPlayer.heldSourceConnection
         let priming = AudioOutput.primerEnabled
-        let scrolls = BridgeScript.pageScrolls
         let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
             AppMenu.Action(title: "Play a test video…", destructive: false) { [weak self] in self?.askTestVideo() },
             AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
-            AppMenu.Action(
-                title: scrolls ? "Slide the page as one layer" : "Slide the page by scrolling", destructive: false
-            ) { [weak self] in
-                BridgeScript.pageScrolls = !scrolls
-                self?.loadPage()
-                self?.flashStatus(scrolls
-                    ? "The page slides up and down as one layer, as it did"
-                    : "The page slides up and down by scrolling")
-            },
             AppMenu.Action(title: held ? "Use ranged source requests" : "Hold one source connection", destructive: false) {
                 [weak self] in
                 AetherPlayer.heldSourceConnection = !held
@@ -542,12 +531,6 @@ final class MainViewController: UIViewController, RemoteReceiver {
             NSLog("[page] %@", message.text("message") ?? "")
         case "tvos-page-stats":
             MemoryLog.pageStats(message)
-        case "tvos-slide":
-            // How the page drew the slide after an Up or Down, in the remote log beside the key.
-            let n = { (name: String) in Int(message.number(name) ?? 0) }
-            input.notePage("\(message.text("key") ?? "?") slide: \(n("frames")) frames in \(n("ms")) ms, "
-                + "longest gap \(n("longest")) ms, \(n("slow")) slow; \(n("nodes")) elements added, "
-                + "\(n("images")) pictures loaded")
         default:
             // Downloads, keyboard completions and the like have no Apple TV part.
             break

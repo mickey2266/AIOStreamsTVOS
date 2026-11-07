@@ -119,11 +119,6 @@ final class RemoteInput {
             + (trail.isEmpty ? ["  nothing yet"] : trail)
     }
 
-    /// A line from the page, such as how smoothly a key's slide was drawn, among the events.
-    func notePage(_ text: String) {
-        note("  page: \(text)")
-    }
-
     private func note(_ text: String) {
         let time = ProcessInfo.processInfo.systemUptime.truncatingRemainder(dividingBy: 1000)
         trail.append(String(format: "  %7.2f  ", time) + text)

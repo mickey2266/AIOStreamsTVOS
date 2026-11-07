@@ -12,24 +12,12 @@ import Foundation
  */
 enum BridgeScript {
     /// `storage` is the app's copy of localStorage by origin, as JSON.
-    static func make(version: String, device: String, deviceId: String, storage: String, pageScrolls: Bool) -> String {
+    static func make(version: String, device: String, deviceId: String, storage: String) -> String {
         template
             .replacingOccurrences(of: "__VERSION__", with: literal(version))
             .replacingOccurrences(of: "__DEVICE__", with: literal(device))
             .replacingOccurrences(of: "__DEVICE_ID__", with: literal(deviceId))
             .replacingOccurrences(of: "__STORAGE__", with: storage)
-            .replacingOccurrences(of: "__PAGE_SCROLLS__", with: pageScrolls ? "true" : "false")
-    }
-
-    /**
-     * How a keyed move up or down the page slides. Off (the page's own way), the page jumps and its
-     * whole content, a layer the page's height, is eased back over the jump on the compositor. On,
-     * the page's scroll position itself is eased there frame by frame, as rows are. Chosen in the
-     * app menu, to tell which slides smoothly here; it takes effect as the page loads again.
-     */
-    static var pageScrolls: Bool {
-        get { UserDefaults.standard.bool(forKey: "web.pageScrolls") }
-        set { UserDefaults.standard.set(newValue, forKey: "web.pageScrolls") }
     }
 
     private static func literal(_ text: String) -> String {
@@ -84,13 +72,14 @@ enum BridgeScript {
    */
   const SLIDES = true;
   /*
-   * The app menu's page slide switch (`BridgeScript.pageScrolls`). With it on,
+   * A keyed move up or down eases the scroll position itself, frame by frame:
    * the page's glide code finds no layer to ease a box's content in
-   * (patches/web/0014), so a keyed move up or down eases the scroll position
-   * itself instead: the page's and the home rows' box alike. Rows across keep
-   * their eased layers.
+   * (patches/web/0014), the page's and the home rows' box alike. Its own way
+   * jumps and eases the whole content, a layer the page's height, back over the
+   * jump, and on an Apple TV that judders even on the settings page, which has
+   * no artwork. Rows across keep their eased layers.
    */
-  const PAGE_SCROLLS = __PAGE_SCROLLS__;
+  const PAGE_SCROLLS = true;
   try {
     Object.defineProperty(window, '__aioTVScrolls', { value: PAGE_SCROLLS });
   } catch {}
@@ -230,62 +219,6 @@ enum BridgeScript {
     // Capture: the page and each row scroll in their own containers.
     document.addEventListener('scroll', soonSweep, { capture: true, passive: true });
   } catch {}
-
-  /*
-   * A single Up or Down slides the page on the compositor, so what makes one
-   * judder is what the page does meanwhile. For the app menu, each slide's
-   * frames as the page drew them over `SLIDE_WATCH`: how many, the longest gap
-   * between two, and how many gaps were long enough to show (two frames or
-   * more); with the elements added and the pictures loaded in the meantime.
-   */
-  const SLIDE_WATCH = 400;
-  let watchingSlide = false;
-  const watchSlide = (name) => {
-    if (watchingSlide) return;
-    watchingSlide = true;
-    const start = performance.now();
-    let last = start;
-    let frames = 0;
-    let longest = 0;
-    let slow = 0;
-    let nodes = 0;
-    let images = 0;
-    let observer = null;
-    try {
-      observer = new MutationObserver((list) => {
-        for (const change of list) nodes += change.addedNodes.length;
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-    } catch {}
-    const loaded = (e) => {
-      if (e.target && e.target.tagName === 'IMG') images++;
-    };
-    document.addEventListener('load', loaded, true);
-    const tick = (time) => {
-      const gap = time - last;
-      last = time;
-      frames++;
-      if (frames > 1) {
-        longest = Math.max(longest, gap);
-        if (gap > 34) slow++;
-      }
-      if (time - start < SLIDE_WATCH) return requestAnimationFrame(tick);
-      observer?.disconnect();
-      document.removeEventListener('load', loaded, true);
-      watchingSlide = false;
-      send({
-        type: 'tvos-slide',
-        key: name,
-        ms: Math.round(time - start),
-        frames,
-        longest: Math.round(longest),
-        slow,
-        nodes,
-        images,
-      });
-    };
-    requestAnimationFrame(tick);
-  };
 
   const listeners = new Set();
   const send = (message) => handler.postMessage(JSON.stringify(message));
@@ -573,11 +506,9 @@ enum BridgeScript {
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
         key('keydown', name, repeat);
-        if (name === 'ArrowUp' || name === 'ArrowDown') {
-          if (!repeat) watchSlide(name);
-          // A scrolled slide runs no animation to wait for, so the artwork sweep is told how long it runs.
-          if (PAGE_SCROLLS) slidingUntil = Math.max(slidingUntil, performance.now() + 300);
-        }
+        // A scrolled slide runs no animation to wait for, so the artwork sweep is told how long it runs.
+        if (PAGE_SCROLLS && (name === 'ArrowUp' || name === 'ArrowDown'))
+          slidingUntil = Math.max(slidingUntil, performance.now() + 300);
         // Left from a row's first card that the page left where it was: into the navigation.
         if (name === 'ArrowLeft' && !repeat && inRow(el)) {
           const pressed = now;
