@@ -20,7 +20,7 @@ settings:
     # Set this to your Apple Developer team ID, or pick the team in Xcode.
     DEVELOPMENT_TEAM: ""
     # Shared by the app and its Top Shelf extension, which have to match.
-    MARKETING_VERSION: "1.1.1"
+    MARKETING_VERSION: "1.1.2"
     # A local build's. CI builds give the workflow's run number instead, so each is newer than the last.
     CURRENT_PROJECT_VERSION: "1"
 targets:
