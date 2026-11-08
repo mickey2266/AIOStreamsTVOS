@@ -228,7 +228,7 @@ enum AppAnswers {
         let audio = EngineLogBook.recentAudio
         if !audio.isEmpty {
             lines.append("")
-            lines.append("Engine's audio log, newest last:")
+            lines.append("Engine's audio and loading log, newest last:")
             lines += audio
         }
         return lines

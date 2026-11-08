@@ -254,20 +254,35 @@ enum AudioOutput {
 enum EngineLogBook {
     private static let lock = NSLock()
     private static var audio: [String] = []
-    private static let kept = 14
+    private static let kept = 20
     private static let audioWords = ["atmos", "eac3", "e-ac-3", "joc", "truehd", "dts", "audio", "mat ", "apac", "bridge", "spatial"]
+    /// The lines that say which way a video went and why it failed: the probe, the HLS reroutes
+    /// (AE#154 and AE#246 to AVPlayer, AE#363 and AE#678 to the engine's live reader) and AVPlayer giving up.
+    private static let loadWords = ["probe failed", "ae#154", "ae#246", "ae#363", "ae#678", "failedtoplaytoend",
+                                    "hls playlist body", "[player]"]
 
     /// The engine calls the handler from its own threads, so this keeps no main-thread state.
     static func install() {
         EngineLog.handler = { line in
             NSLog("[aether] %@", line)
             let lower = line.lowercased()
-            guard audioWords.contains(where: { lower.contains($0) }) else { return }
-            lock.lock()
-            audio.append(String(line.prefix(400)))
-            if audio.count > kept { audio.removeFirst(audio.count - kept) }
-            lock.unlock()
+            guard audioWords.contains(where: { lower.contains($0) })
+                || loadWords.contains(where: { lower.contains($0) }) else { return }
+            keep(line)
         }
+    }
+
+    /// The app's own line, beside the engine's, for the app menu.
+    static func note(_ line: String) {
+        NSLog("%@", line)
+        keep(line)
+    }
+
+    private static func keep(_ line: String) {
+        lock.lock()
+        audio.append(String(line.prefix(400)))
+        if audio.count > kept { audio.removeFirst(audio.count - kept) }
+        lock.unlock()
     }
 
     static var recentAudio: [String] {
