@@ -83,10 +83,10 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
  * linear one across the top of the screen, the grid one (Settings → General →
  * Keyboard) down the left, over the page's navigation and results. An app
  * can't place it, but it can give it a smaller space to lay out in, so the grid
- * keyboard gets a box at the screen's top right: its keys' width, clipped from a
- * wider layout as tvOS lays the search field out across it (as NuvioTVOS hosts
- * it). The page shows to the left, and moving left off the keys returns to it.
- * The linear keyboard keeps the whole screen.
+ * keyboard gets a layout at the screen's top right, and tvOS draws it there (in
+ * a window of its own). A black box behind it is measured around the keyboard
+ * as drawn. The page shows to the left, and moving left off the keys returns to
+ * it. The linear keyboard keeps the whole screen.
  *
  * Which keyboard tvOS drew is read from its views, as NuvioTVOS reads it: one
  * taller than 320 pt and narrower than 900 pt is the grid. The last one seen is
@@ -96,13 +96,12 @@ private final class KeyboardHost: UIViewController {
     var leave: () -> Void = {}
 
     /*
-     * The grid keyboard's box: as wide and tall as the keyboard tvOS draws, read from its view once
-     * it's laid out, plus a margin. NuvioTVOS's 520 pt clipped this one's last column of keys, so
-     * 640 is the first guess until a keyboard has been measured; the measure is remembered.
+     * The grid keyboard's layout: the size it's laid out at, at the screen's top right, where tvOS
+     * draws the keyboard (in a window of its own) 190 pt in from the layout's left. tvOS places the
+     * keyboard again only when the layout's size changes, not when it moves, so the layout stays
+     * put; the black box behind the keys is measured around the keyboard on the screen instead.
      */
-    private static let gridFirstWidth: CGFloat = 640
-    private static let gridMinWidth: CGFloat = 360
-    private static let gridMaxWidth: CGFloat = 960
+    private static let gridLayoutLeft: CGFloat = 640
     private static let gridLayoutWidth: CGFloat = 840
     private static let gridHeight: CGFloat = 860
     /// Room around the keys, on the right and below them.
@@ -111,48 +110,24 @@ private final class KeyboardHost: UIViewController {
     private static let gridLeftRoom: CGFloat = 48
     /// tvOS's own margin from the screen's edge, inside which a TV shows all of the picture.
     private static let gridRightInset: CGFloat = 90
-    // New names, so measures an earlier build saved don't place this one's box.
-    private static let gridKey = "keyboard.gridLayout.v5"
-    private static let gridLeftKey = "keyboard.gridLeft.v5"
-    private static let gridWidthKey = "keyboard.gridKeysWidth.v5"
-    private static let gridHeightKey = "keyboard.gridHeight.v5"
+    private static let gridKey = "keyboard.gridLayout.v6"
 
     private static var rememberedGrid: Bool {
         get { UserDefaults.standard.bool(forKey: gridKey) }
         set { UserDefaults.standard.set(newValue, forKey: gridKey) }
     }
 
-    /**
-     * Where the keys sit in the layout, as measured: from their left edge across their width, and
-     * down to their bottom. tvOS lays them out some way in from the layout's left, which the box
-     * leaves out by moving the layout left by as much.
-     */
-    private static var rememberedKeys: CGRect? {
-        get {
-            let defaults = UserDefaults.standard
-            let width = defaults.double(forKey: gridWidthKey)
-            let height = defaults.double(forKey: gridHeightKey)
-            guard width > 0, height > 0 else { return nil }
-            return CGRect(x: defaults.double(forKey: gridLeftKey), y: 0, width: width, height: height)
-        }
-        set {
-            let defaults = UserDefaults.standard
-            defaults.set(Double(newValue?.minX ?? 0), forKey: gridLeftKey)
-            defaults.set(Double(newValue?.width ?? 0), forKey: gridWidthKey)
-            defaults.set(Double(newValue?.maxY ?? 0), forKey: gridHeightKey)
-        }
-    }
+    /// Where tvOS drew the grid keyboard, on the screen (in this view), once measured.
+    private var keys: CGRect?
 
-    private var keys = KeyboardHost.rememberedKeys
-
-    private let container: UIViewController
+    private let container: Container
     private let box = UIView()
     private let leftOfBox = FocusTrap()
     private var grid = KeyboardHost.rememberedGrid
     private var detectQueued = false
     private var focusWatch: NSObjectProtocol?
 
-    init(container: UIViewController) {
+    init(container: Container) {
         self.container = container
         super.init(nibName: nil, bundle: nil)
     }
@@ -166,13 +141,15 @@ private final class KeyboardHost: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        box.clipsToBounds = true
         box.layer.cornerRadius = 28
+        box.backgroundColor = .black
+        box.isUserInteractionEnabled = false
+        box.isHidden = true
         leftOfBox.reached = { [weak self] in self?.leave() }
         view.addSubview(leftOfBox)
         view.addSubview(box)
         addChild(container)
-        box.addSubview(container.view)
+        view.addSubview(container.view)
         container.didMove(toParent: self)
         // Focus moving is when tvOS has the keyboard laid out, and when it may have swapped it.
         focusWatch = NotificationCenter.default.addObserver(
@@ -202,23 +179,26 @@ private final class KeyboardHost: UIViewController {
     private func place() {
         let bounds = view.bounds
         if grid {
-            let measured = keys.map { $0.width + Self.gridLeftRoom + Self.gridMargin } ?? Self.gridFirstWidth
-            let width = min(max(measured, Self.gridMinWidth), Self.gridMaxWidth)
-            let tall = keys.map { $0.maxY + Self.gridMargin } ?? Self.gridHeight
-            box.frame = CGRect(x: bounds.maxX - Self.gridRightInset - width, y: 0,
-                               width: width, height: min(tall, bounds.height))
-            box.backgroundColor = .black
-            // Always laid out the same width, so the keys stay where they were measured; moved left
-            // by the space tvOS leaves before them, less the box's margin.
-            let shift = keys.map { Self.gridLeftRoom - $0.minX } ?? 0
-            container.view.frame = CGRect(x: shift, y: 0, width: Self.gridLayoutWidth,
-                                          height: min(Self.gridHeight, bounds.height))
-            leftOfBox.frame = CGRect(x: 0, y: 0, width: box.frame.minX, height: bounds.height)
+            // Always the same place and size, so tvOS keeps the keyboard where it was measured.
+            let layout = CGRect(x: bounds.maxX - Self.gridRightInset - Self.gridLayoutLeft, y: 0,
+                                width: Self.gridLayoutWidth, height: min(Self.gridHeight, bounds.height))
+            container.view.frame = layout
+            container.showsBackdrop = false
+            if let keys {
+                box.frame = CGRect(x: keys.minX - Self.gridLeftRoom, y: 0,
+                                   width: keys.width + Self.gridLeftRoom + Self.gridMargin,
+                                   height: min(keys.maxY + Self.gridMargin, bounds.height))
+                box.isHidden = false
+            } else {
+                box.isHidden = true
+            }
+            let left = box.isHidden ? layout.minX : box.frame.minX
+            leftOfBox.frame = CGRect(x: 0, y: 0, width: max(0, left), height: bounds.height)
             leftOfBox.isHidden = false
         } else {
-            box.frame = bounds
-            box.backgroundColor = .clear
-            container.view.frame = box.bounds
+            container.view.frame = bounds
+            container.showsBackdrop = true
+            box.isHidden = true
             leftOfBox.isHidden = true
         }
     }
@@ -244,17 +224,19 @@ private final class KeyboardHost: UIViewController {
         var measuredKeys: CGRect?
         var narrowest = CGFloat.infinity
         let layout: UIView = container.view
+        // Measured on the screen, in this view, which doesn't move: the box is placed in it.
+        let screen: UIView = self.view
         func look(_ view: UIView) {
             guard !view.isHidden, view.alpha > 0 else { return }
             if String(describing: type(of: view)).contains("Keyboard") {
                 let size = view.bounds.size
                 if size.height > 320, size.width > 200, size.width < 900 {
                     found = true
-                    // tvOS draws the keyboard in a window of its own, placed from the layout, so it's
-                    // measured in the layout's terms wherever it's drawn.
+                    // tvOS draws the keyboard in a window of its own, so it's measured on the screen
+                    // wherever it's drawn.
                     if size.width < narrowest {
                         narrowest = size.width
-                        measuredKeys = view.convert(view.bounds, to: layout)
+                        measuredKeys = view.convert(view.bounds, to: screen)
                     }
                 } else if found == nil, size.width > 400, size.height > 40, size.height <= 320 {
                     found = false
@@ -271,7 +253,7 @@ private final class KeyboardHost: UIViewController {
         let focused = UIFocusSystem.focusSystem(for: layout)?.focusedItem
         var fromFocus: CGRect?
         if found, let keyboard = focused as? UIView, String(describing: type(of: keyboard)).contains("Keyboard") {
-            let frame = keyboard.convert(keyboard.bounds, to: layout)
+            let frame = keyboard.convert(keyboard.bounds, to: screen)
             if frame.height > 320, frame.width > 200, frame.width < 900 { fromFocus = frame }
         }
         if let fromFocus { measuredKeys = fromFocus }
@@ -282,30 +264,32 @@ private final class KeyboardHost: UIViewController {
             )
         }
         var changed = found != grid
-        if found, let measuredKeys, measuredKeys.width > 0, measuredKeys.maxY > 0 {
-            let rounded = CGRect(x: measuredKeys.minX.rounded(.down), y: 0,
-                                 width: measuredKeys.width.rounded(.up), height: measuredKeys.maxY.rounded(.up))
-            // A point or two either way is the same place, so a move can't keep starting another.
+        // Only a keyboard on the screen places the box.
+        if found, let measuredKeys, measuredKeys.width > 0, measuredKeys.height > 0,
+           screen.bounds.contains(CGPoint(x: measuredKeys.midX, y: measuredKeys.midY)) {
+            let rounded = measuredKeys.integral
+            // A point or two either way is the same place.
             let same = keys.map {
                 abs($0.minX - rounded.minX) <= 2 && abs($0.width - rounded.width) <= 2 &&
                     abs($0.maxY - rounded.maxY) <= 2
             } ?? false
             if !same {
                 keys = rounded
-                Self.rememberedKeys = rounded
                 changed = true
             }
         }
         guard changed else { return }
+        let layoutChanges = found != grid
         grid = found
         Self.rememberedGrid = found
-        UIView.animate(withDuration: 0.2, animations: {
-            self.place()
-            self.container.view.layoutIfNeeded()
-        }, completion: { [weak self] _ in
-            // Measured again where the move left the keys.
-            self?.detectSoon()
-        })
+        if layoutChanges {
+            // tvOS lays the keyboard out again for the layout's new size: measured where it lands.
+            keys = nil
+            place()
+            detectSoon()
+        } else {
+            UIView.animate(withDuration: 0.2) { self.place() }
+        }
     }
 }
 
@@ -329,7 +313,7 @@ enum KeyboardReport {
     ) {
         var out = [
             "Grid keyboard, last measured \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)):",
-            "Layout: \(text(layout.frame)) in the box; box \(text(box)) on screen",
+            "Layout: \(text(layout.frame)); box \(text(box)); both on screen, as the keyboard below",
             "Narrowest keyboard view: \(text(fromView))",
             "Focused keyboard view: \(text(fromFocus))",
             "Used: \(text(used))",
@@ -375,6 +359,10 @@ enum KeyboardReport {
  */
 private final class Container: UISearchContainerViewController {
     var disappeared: () -> Void = {}
+    /// Off for the grid keyboard, whose box behind its keys is the host's.
+    var showsBackdrop = true {
+        didSet { backdrop.isHidden = !showsBackdrop }
+    }
     private let backdrop = UIView()
     private let cutOut = CAShapeLayer()
 
@@ -383,6 +371,7 @@ private final class Container: UISearchContainerViewController {
         // tvOS has no systemBackground; the app's dark style is black.
         backdrop.backgroundColor = .black
         backdrop.isUserInteractionEnabled = false
+        backdrop.isHidden = !showsBackdrop
         cutOut.fillRule = .evenOdd
         view.insertSubview(backdrop, at: 0)
     }
