@@ -159,11 +159,16 @@ final class AetherPlayer {
             } else {
                 AudioOutput.startPrimer()
             }
+            // A live playlist has to be declared to the engine (`LiveHLS`); it plays from the live edge.
+            var live = false
+            if !request.isTrailer { live = await LiveHLS.isLive(url, headers: request.headers) }
+            guard generation == self.generation else { return }
+            if live { NSLog("[player] live HLS: %@", url.absoluteString) }
             do {
                 try await self.engine.load(
                     url: url,
-                    startPosition: request.startMs > 0 ? request.startMs / 1000 : nil,
-                    options: self.options(for: request)
+                    startPosition: !live && request.startMs > 0 ? request.startMs / 1000 : nil,
+                    options: self.options(for: request, live: live)
                 )
                 guard generation == self.generation else { return }
                 self.loaded(request)
@@ -177,9 +182,12 @@ final class AetherPlayer {
     }
 
     /// How the file plays: mostly the page's sound settings, read for Atmos (see the type's notes).
-    private func options(for request: LoadRequest) -> LoadOptions {
+    private func options(for request: LoadRequest, live: Bool) -> LoadOptions {
         var options = LoadOptions()
         options.httpHeaders = request.headers
+        // The engine takes a live `.m3u8` straight onto its own HLS reader, which puts the headers on every
+        // playlist and segment request; without this it plays the playlist in AVPlayer as a finished one.
+        options.isLive = live
         // Held for the link, it plays from `releaseHold` instead.
         options.autoplay = !paused && !holdingForLink
         options.preferredAudioLanguages = request.audioLanguages
@@ -236,7 +244,9 @@ final class AetherPlayer {
         // space, so a fuller Apple TV buffers less than 10 minutes rather than filling up. The
         // engine's software player keeps its packets in memory on tvOS, 96 MB ahead and 128 MB
         // behind, and neither changes anything there.
-        if settings.cacheMb > 0 {
+        // Live can't be read ahead of the broadcast, so it keeps the engine's own live window (nothing set).
+        if live {
+        } else if settings.cacheMb > 0 {
             options.forwardBufferSegments = Self.cacheWindowSegments
             options.sessionCacheByteBudget = settings.cacheMb * 1_000_000
         } else {
