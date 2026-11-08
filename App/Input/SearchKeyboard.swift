@@ -107,13 +107,15 @@ private final class KeyboardHost: UIViewController {
     private static let gridHeight: CGFloat = 860
     /// Room around the keys, on each side.
     private static let gridMargin: CGFloat = 32
+    /// The largest a key is, so wider focus items such as the search field aren't measured as keys.
+    private static let keyMaxSize: CGFloat = 200
     /// tvOS's own margin from the screen's edge, inside which a TV shows all of the picture.
     private static let gridRightInset: CGFloat = 90
     // New names, so measures an earlier build saved don't place this one's box.
-    private static let gridKey = "keyboard.gridLayout.v2"
-    private static let gridLeftKey = "keyboard.gridLeft.v2"
-    private static let gridWidthKey = "keyboard.gridKeysWidth.v2"
-    private static let gridHeightKey = "keyboard.gridHeight.v2"
+    private static let gridKey = "keyboard.gridLayout.v3"
+    private static let gridLeftKey = "keyboard.gridLeft.v3"
+    private static let gridWidthKey = "keyboard.gridKeysWidth.v3"
+    private static let gridHeightKey = "keyboard.gridHeight.v3"
 
     private static var rememberedGrid: Bool {
         get { UserDefaults.standard.bool(forKey: gridKey) }
@@ -246,7 +248,12 @@ private final class KeyboardHost: UIViewController {
         while let each = environment {
             if let container = each.focusItemContainer {
                 let space = container.coordinateSpace
-                let items = container.focusItems(in: space.bounds)
+                // Keys only: the search field and other wide items run in from the layout's left edge,
+                // which left the box's space on the left.
+                let items = container.focusItems(in: space.bounds).filter { item in
+                    item.frame.width > 0 && item.frame.height > 0 &&
+                        item.frame.width <= Self.keyMaxSize && item.frame.height <= Self.keyMaxSize
+                }
                 if items.count >= 12 {
                     let union = items.reduce(CGRect.null) { all, item in
                         all.union(space.convert(item.frame, to: layout))
@@ -297,7 +304,12 @@ private final class KeyboardHost: UIViewController {
         if found, let measuredKeys, measuredKeys.width > 0, measuredKeys.maxY > 0 {
             let rounded = CGRect(x: measuredKeys.minX.rounded(.down), y: 0,
                                  width: measuredKeys.width.rounded(.up), height: measuredKeys.maxY.rounded(.up))
-            if rounded != keys {
+            // A point or two either way is the same place, so a move can't keep starting another.
+            let same = keys.map {
+                abs($0.minX - rounded.minX) <= 2 && abs($0.width - rounded.width) <= 2 &&
+                    abs($0.maxY - rounded.maxY) <= 2
+            } ?? false
+            if !same {
                 keys = rounded
                 Self.rememberedKeys = rounded
                 changed = true
@@ -306,10 +318,13 @@ private final class KeyboardHost: UIViewController {
         guard changed else { return }
         grid = found
         Self.rememberedGrid = found
-        UIView.animate(withDuration: 0.2) {
+        UIView.animate(withDuration: 0.2, animations: {
             self.place()
             self.container.view.layoutIfNeeded()
-        }
+        }, completion: { [weak self] _ in
+            // Measured again where the move left the keys.
+            self?.detectSoon()
+        })
     }
 }
 
