@@ -6,11 +6,16 @@ import Foundation
  * page's `player-load` doesn't say. Told nothing, the engine takes a live
  * playlist for a finished one and hands it to AVPlayer as one: no live edge,
  * and no move to its own HLS reader when AVPlayer can't show the picture
- * (HEVC in MPEG-TS, common on IPTV).
+ * (HEVC in MPEG-TS, common on IPTV). AVPlayer then gives up on it, and the
+ * page shows "the live stream stopped".
  *
- * Only a URL ending in `.m3u8` or `.m3u` is read, so a file from a debrid
- * service or a server costs no request. A media playlist is live without
- * `#EXT-X-ENDLIST`; a master playlist is judged by its first variant.
+ * Every URL is asked once, as a channel's link often carries no `.m3u8` (an
+ * add-on's or a proxy's address that redirects to the playlist). The answer is
+ * read only as far as it takes to tell: a video's is dropped at its headers (a
+ * video or audio type, or longer than `maxBytes`), or after its first
+ * `sniffBytes` at most, so a file from a debrid service or a server costs one
+ * short request. A media playlist is live without `#EXT-X-ENDLIST`; a master
+ * playlist is judged by its first variant.
  */
 enum LiveHLS {
     private static let session: URLSession = {
@@ -21,14 +26,11 @@ enum LiveHLS {
 
     /// The largest playlist read; a live window is a few kilobytes.
     private static let maxBytes = 2 * 1024 * 1024
+    /// How much of an answer is read before it's known not to be a playlist.
+    private static let sniffBytes = 1024
 
-    static func mayBePlaylist(_ url: URL) -> Bool {
-        ["m3u8", "m3u"].contains(url.pathExtension.lowercased())
-    }
-
-    /// True for a live HLS playlist; false for anything else, and when the playlist can't be read.
+    /// True for a live HLS playlist; false for anything else, and when the answer can't be read.
     static func isLive(_ url: URL, headers: [String: String]) async -> Bool {
-        guard mayBePlaylist(url) else { return false }
         do {
             guard let (text, at) = try await playlist(url, headers: headers) else { return false }
             if text.contains("#EXT-X-STREAM-INF") {
@@ -62,17 +64,44 @@ enum LiveHLS {
         return nil
     }
 
-    /// The playlist's text and the address it came from (after redirects), or nil if it isn't one.
+    /// Whether the response's headers already say it's media rather than a playlist.
+    static func isMedia(_ response: URLResponse) -> Bool {
+        let type = (response.mimeType ?? "").lowercased()
+        if type.contains("mpegurl") { return false }
+        if type.hasPrefix("video/") || type.hasPrefix("audio/") { return true }
+        return response.expectedContentLength > Int64(maxBytes)
+    }
+
+    /// Whether the first bytes are a playlist's, past a byte order mark and blank space.
+    static func beginsAsPlaylist(_ head: Data) -> Bool {
+        var bytes = head[...]
+        if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { bytes = bytes.dropFirst(3) }
+        bytes = bytes.drop { $0 == 0x20 || $0 == 0x09 || $0 == 0x0A || $0 == 0x0D }
+        return bytes.starts(with: Array("#EXTM3U".utf8))
+    }
+
+    /// The playlist's text and the address it came from (after redirects), or nil if the answer isn't one.
     private static func playlist(_ url: URL, headers: [String: String]) async throws -> (String, URL)? {
         var request = URLRequest(url: url)
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
-        let (data, response) = try await session.data(for: request)
+        let (bytes, response) = try await session.bytes(for: request)
+        // The rest of a video's answer is never wanted; cancelling the task closes the request.
+        defer { bytes.task.cancel() }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw ProtocolError("HTTP \(http.statusCode)")
         }
-        guard data.count <= maxBytes, let text = String(data: data, encoding: .utf8) else { return nil }
-        let trimmed = text.drop { $0 == "\u{FEFF}" || $0.isWhitespace }
-        guard trimmed.hasPrefix("#EXTM3U") else { return nil }
+        guard !isMedia(response) else { return nil }
+        var data = Data()
+        var checked = false
+        for try await byte in bytes {
+            data.append(byte)
+            if !checked, data.count >= sniffBytes {
+                guard beginsAsPlaylist(data) else { return nil }
+                checked = true
+            }
+            if data.count > maxBytes { return nil }
+        }
+        guard beginsAsPlaylist(data), let text = String(data: data, encoding: .utf8) else { return nil }
         return (text, response.url ?? url)
     }
 }

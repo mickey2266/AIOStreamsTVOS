@@ -185,8 +185,9 @@ final class AetherPlayer {
     private func options(for request: LoadRequest, live: Bool) -> LoadOptions {
         var options = LoadOptions()
         options.httpHeaders = request.headers
-        // The engine takes a live `.m3u8` straight onto its own HLS reader, which puts the headers on every
-        // playlist and segment request; without this it plays the playlist in AVPlayer as a finished one.
+        // The engine takes a live playlist onto its own HLS reader, which puts the headers on every playlist
+        // and segment request: a `.m3u8` at once, any other address once it answers with a playlist (AE#363).
+        // Without this it plays the playlist in AVPlayer as a finished one.
         options.isLive = live
         // Held for the link, it plays from `releaseHold` instead.
         options.autoplay = !paused && !holdingForLink
