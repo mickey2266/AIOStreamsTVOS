@@ -21,6 +21,15 @@
       "category": "entertainment",
       "versions": [
         {
+          "version": "1.1.2",
+          "buildVersion": "172",
+          "date": "2026-11-08",
+          "localizedDescription": "AIOStreams for Apple TV 1.1.2. Release notes: https://github.com/mickey2266/AIOStreamsTVOS/releases/tag/v1.1.2",
+          "downloadURL": "https://github.com/mickey2266/AIOStreamsTVOS/releases/download/v1.1.2/AIOStreams.ipa",
+          "size": 13732308,
+          "minOSVersion": "18.0"
+        },
+        {
           "version": "1.1.1",
           "buildVersion": "146",
           "date": "2026-11-07",
