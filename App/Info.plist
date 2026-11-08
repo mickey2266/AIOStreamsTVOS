@@ -63,14 +63,13 @@
 			</array>
 		</dict>
 	</array>
-	<!-- Jellyfin servers on the local network are often plain http. -->
+	<!-- Jellyfin servers on the local network and IPTV channels are often plain http. NSAllowsArbitraryLoads
+	     alone: with NSAllowsArbitraryLoadsInWebContent, NSAllowsArbitraryLoadsForMedia or NSAllowsLocalNetworking
+	     beside it, tvOS ignores it, and only the web view and local addresses could use http, so a channel's
+	     http playlist was refused to AVPlayer, the engine's live reader and the app's own requests. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsArbitraryLoadsInWebContent</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
