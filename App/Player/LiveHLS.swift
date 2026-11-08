@@ -9,15 +9,13 @@ import Foundation
  * (HEVC in MPEG-TS, common on IPTV). AVPlayer then gives up on it, and the
  * page shows "the live stream stopped".
  *
- * Every URL is asked once, as a channel's link often carries no `.m3u8` (an
- * add-on's or a proxy's address that redirects to the playlist). The answer is
- * read only as far as it takes to tell: one longer than `maxBytes` is dropped
- * at its headers, and anything else after its first `sniffBytes` unless they
- * start a playlist, so a file from a debrid service or a server costs one
- * short request. The content type isn't trusted either way: IPTV servers send
- * playlists as `video/mp2t` or `application/octet-stream`. A media playlist is
- * live without `#EXT-X-ENDLIST`; a master playlist is judged by its first
- * variant.
+ * Only a URL ending in `.m3u8` or `.m3u` is asked (`mayBePlaylist`), so a film
+ * or an episode from a debrid service or a server costs no request. The answer
+ * is read by its bytes, not its content type, which IPTV servers set to
+ * `video/mp2t` or `application/octet-stream` for playlists: one longer than
+ * `maxBytes` is dropped at its headers, and anything else after its first
+ * `sniffBytes` unless they start a playlist. A media playlist is live without
+ * `#EXT-X-ENDLIST`; a master playlist is judged by its first variant.
  */
 enum LiveHLS {
     struct Verdict {
@@ -42,6 +40,11 @@ enum LiveHLS {
     private enum Answer {
         case playlist(String, URL)
         case notPlaylist(String)
+    }
+
+    /// An address that names an HLS playlist, the only kind the check asks.
+    static func mayBePlaylist(_ url: URL) -> Bool {
+        ["m3u8", "m3u"].contains(url.pathExtension.lowercased())
     }
 
     static func check(_ url: URL, headers: [String: String]) async -> Verdict {
