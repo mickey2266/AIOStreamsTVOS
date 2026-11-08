@@ -124,8 +124,8 @@ For Atmos at all, set **Settings → Video and Audio → Audio Format** to **Aut
 
 **Settings → Video and Audio → Audio Format → Continuous Audio Connection** decides how decoded
 sound reaches the receiver. **Keep it off.** Turn it on only if surround the Apple TV decodes
-(TrueHD, DTS-HD, or any track the page reshapes) keeps playing as stereo, and turning on the app
-menu's Dolby primer (below) doesn't fix it. With it on, decoded sound reaches the receiver as
+(TrueHD, DTS-HD, or any track the page reshapes) keeps playing as stereo, and neither the TV's
+Passthrough output nor the app menu's Dolby primer (both below) fixes it. With it on, decoded sound reaches the receiver as
 multichannel, but it may use the wrong channel mapping, with surround channels playing from the
 wrong speakers.
 
@@ -138,6 +138,15 @@ With it off, some setups take decoded sound only as stereo. On a TV and soundbar
   on eARC. E-AC-3 and AC-3 played as a stream copy are unaffected: they reach the soundbar still
   encoded, E-AC-3 Atmos inside Dolby MAT on a 2-channel carrier, and the soundbar decodes every
   channel itself (Dolby's 7.1.4 demo plays in full with the setting off).
+
+  Try the TV first, where the soundbar is connected through it: setting the TV's digital audio
+  output format from Auto to Passthrough (the name differs by maker; on a Samsung TV it's under
+  Sound → Expert Settings → Digital Output Audio Format) might fix it, without the Dolby primer
+  below. On one Samsung TV and soundbar on eARC, with Continuous Audio Connection off, decoded
+  7.1 then played as multichannel PCM from the start. Setups differ, so it may not help on yours.
+  Connecting the Apple TV to the soundbar's HDMI input, so the sound skips the TV, might fix it too,
+  if the soundbar passes the picture on in full: 4K with HDR10 and Dolby Vision, and the frame-rate
+  and HDR switching of Match Content. Not every soundbar's HDMI input does.
 
   A Dolby bitstream widens the link, and it stays wide for the PCM that follows: Infuse played
   TrueHD as stereo PCM, then as multichannel PCM after a switch to the E-AC-3 track and back,
