@@ -43,8 +43,10 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         bar.autocorrectionType = .no
         bar.autocapitalizationType = .none
 
-        // Over the page, which shows through beside or below the keyboard.
+        // Over the page, which shows through beside or below the keyboard. Faded in, as tvOS fades its
+        // keyboard in, so the black box behind it comes with it rather than sliding up from below.
         host.modalPresentationStyle = .overFullScreen
+        host.modalTransitionStyle = .crossDissolve
         host.view.backgroundColor = .clear
         container.view.backgroundColor = .clear
         search.view.backgroundColor = .clear
@@ -52,7 +54,19 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         host.leave = { [weak host] in host?.dismiss(animated: true) }
         below.moved = { [weak container] in container?.view.setNeedsLayout() }
         container.disappeared = { [weak self] in self?.close() }
+        // The keyboard setting changed since the last one: closed and opened again at once, laid out
+        // for the keyboard tvOS draws now, without telling the page it closed.
+        host.reopen = { [weak self, weak host] in
+            guard let self, let host, let presenter = host.presentingViewController else { return }
+            self.reopening = true
+            host.dismiss(animated: false) {
+                self.reopening = false
+                presenter.present(host, animated: false)
+            }
+        }
     }
+
+    private var reopening = false
 
     // MARK: UISearchResultsUpdating
 
@@ -72,7 +86,7 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
     }
 
     private func close() {
-        guard !closed else { return }
+        guard !closed, !reopening else { return }
         closed = true
         onClose(submitted)
     }
@@ -101,24 +115,44 @@ private final class KeyboardHost: UIViewController {
      * keyboard again only when the layout's size changes, not when it moves, so the layout stays
      * put; the black box behind the keys is measured around the keyboard on the screen instead.
      */
-    private static let gridLayoutLeft: CGFloat = 640
+    /// 720 rather than 640, so the search field's "Hold to dictate", which runs past the keys, has room.
+    private static let gridLayoutLeft: CGFloat = 720
     private static let gridLayoutWidth: CGFloat = 840
     private static let gridHeight: CGFloat = 860
-    /// Room around the keys, on the right and below them.
+    /// Room around what tvOS draws, on each side and below.
     private static let gridMargin: CGFloat = 32
-    /// Room on the keys' left, a little more, as the search field's glyph starts just left of them.
-    private static let gridLeftRoom: CGFloat = 48
     /// tvOS's own margin from the screen's edge, inside which a TV shows all of the picture.
     private static let gridRightInset: CGFloat = 90
-    private static let gridKey = "keyboard.gridLayout.v6"
+    /// How far the search field's "Hold to dictate" runs past the keyboard view's right edge.
+    private static let hintOverhang: CGFloat = 56
+    private static let gridKey = "keyboard.gridLayout.v7"
+    private static let gridDrawnKey = "keyboard.gridDrawn.v7"
 
     private static var rememberedGrid: Bool {
         get { UserDefaults.standard.bool(forKey: gridKey) }
         set { UserDefaults.standard.set(newValue, forKey: gridKey) }
     }
 
-    /// Where tvOS drew the grid keyboard, on the screen (in this view), once measured.
-    private var keys: CGRect?
+    /// Where tvOS last drew the grid keyboard, so the next one's box opens there, with the keyboard.
+    private static var rememberedDrawn: CGRect? {
+        get {
+            guard let text = UserDefaults.standard.string(forKey: gridDrawnKey) else { return nil }
+            let rect = NSCoder.cgRect(for: text)
+            return rect.width > 0 && rect.height > 0 ? rect : nil
+        }
+        set { UserDefaults.standard.set(newValue.map { NSCoder.string(for: $0) }, forKey: gridDrawnKey) }
+    }
+
+    /// What tvOS drew for the grid keyboard (the search field, its hint and the keys), on the screen.
+    private var keys: CGRect? = KeyboardHost.rememberedGrid ? KeyboardHost.rememberedDrawn : nil
+
+    /**
+     * Called once when tvOS drew the other keyboard than the one laid out for (the setting changed
+     * since the last one), to open the keyboard again laid out for it: reshaping the layout under an
+     * open keyboard left it drawn wrong.
+     */
+    var reopen: () -> Void = {}
+    private var reopened = false
 
     private let container: Container
     private let box = UIView()
@@ -185,8 +219,8 @@ private final class KeyboardHost: UIViewController {
             container.view.frame = layout
             container.showsBackdrop = false
             if let keys {
-                box.frame = CGRect(x: keys.minX - Self.gridLeftRoom, y: 0,
-                                   width: keys.width + Self.gridLeftRoom + Self.gridMargin,
+                box.frame = CGRect(x: keys.minX - Self.gridMargin, y: 0,
+                                   width: keys.width + 2 * Self.gridMargin,
                                    height: min(keys.maxY + Self.gridMargin, bounds.height))
                 box.isHidden = false
             } else {
@@ -257,38 +291,65 @@ private final class KeyboardHost: UIViewController {
             if frame.height > 320, frame.width > 200, frame.width < 900 { fromFocus = frame }
         }
         if let fromFocus { measuredKeys = fromFocus }
+        // The search field's row above the keys, its glyph, text and "Hold to dictate", which runs
+        // past the keys' right edge and needs the box's room too.
+        if found, let around = measuredKeys {
+            var drawn = around
+            func field(_ view: UIView, inField: Bool) {
+                guard !view.isHidden, view.alpha > 0.01 else { return }
+                let name = String(describing: type(of: view))
+                let within = inField || name.contains("SearchBar") || name.contains("SearchField") ||
+                    name.contains("TextField")
+                if within, view is UILabel || view is UIImageView {
+                    let frame = view.convert(view.bounds, to: screen)
+                    if frame.width > 0, frame.height > 0, frame.maxY <= around.minY + 8,
+                       frame.minX < screen.bounds.maxX, frame.maxX > around.minX - 120 {
+                        drawn = drawn.union(frame)
+                    }
+                }
+                for subview in view.subviews { field(subview, inField: within) }
+            }
+            for each in windows { field(each, inField: false) }
+            // "Hold to dictate" ran about 50 pt past the keyboard view in the photos, where its label
+            // isn't found; inside the screen, where a TV shows all of the picture.
+            let right = min(max(drawn.maxX, around.maxX + Self.hintOverhang), screen.bounds.maxX - Self.gridMargin - 8)
+            measuredKeys = CGRect(x: drawn.minX, y: drawn.minY, width: right - drawn.minX, height: drawn.height)
+        }
         if found {
             KeyboardReport.record(
                 layout: layout, fromView: fromView, fromFocus: fromFocus,
                 used: measuredKeys, box: box.frame, focused: focused
             )
         }
-        var changed = found != grid
-        // Only a keyboard on the screen places the box.
-        if found, let measuredKeys, measuredKeys.width > 0, measuredKeys.height > 0,
-           screen.bounds.contains(CGPoint(x: measuredKeys.midX, y: measuredKeys.midY)) {
-            let rounded = measuredKeys.integral
-            // A point or two either way is the same place.
-            let same = keys.map {
-                abs($0.minX - rounded.minX) <= 2 && abs($0.width - rounded.width) <= 2 &&
-                    abs($0.maxY - rounded.maxY) <= 2
-            } ?? false
-            if !same {
-                keys = rounded
-                changed = true
-            }
-        }
-        guard changed else { return }
-        let layoutChanges = found != grid
-        grid = found
-        Self.rememberedGrid = found
-        if layoutChanges {
-            // tvOS lays the keyboard out again for the layout's new size: measured where it lands.
-            keys = nil
+        if found != grid {
+            // Laid out for the other keyboard: opened again, once, laid out for this one.
+            grid = found
+            Self.rememberedGrid = found
+            keys = found ? Self.rememberedDrawn : nil
+            guard !reopened else { return place() }
+            reopened = true
             place()
-            detectSoon()
-        } else {
+            reopen()
+            return
+        }
+        // Only a keyboard on the screen places the box.
+        guard found, let measuredKeys, measuredKeys.width > 0, measuredKeys.height > 0,
+              screen.bounds.contains(CGPoint(x: measuredKeys.midX, y: measuredKeys.midY)) else { return }
+        let rounded = measuredKeys.integral
+        // A point or two either way is the same place.
+        let same = keys.map {
+            abs($0.minX - rounded.minX) <= 2 && abs($0.width - rounded.width) <= 2 &&
+                abs($0.maxY - rounded.maxY) <= 2
+        } ?? false
+        guard !same else { return }
+        let had = keys != nil
+        keys = rounded
+        Self.rememberedDrawn = rounded
+        // A box already showing moves to it; one that wasn't shows where it is, with the keyboard.
+        if had {
             UIView.animate(withDuration: 0.2) { self.place() }
+        } else {
+            UIView.performWithoutAnimation { self.place() }
         }
     }
 }
