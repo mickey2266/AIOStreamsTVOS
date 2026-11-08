@@ -112,10 +112,10 @@ private final class KeyboardHost: UIViewController {
     /// tvOS's own margin from the screen's edge, inside which a TV shows all of the picture.
     private static let gridRightInset: CGFloat = 90
     // New names, so measures an earlier build saved don't place this one's box.
-    private static let gridKey = "keyboard.gridLayout.v3"
-    private static let gridLeftKey = "keyboard.gridLeft.v3"
-    private static let gridWidthKey = "keyboard.gridKeysWidth.v3"
-    private static let gridHeightKey = "keyboard.gridHeight.v3"
+    private static let gridKey = "keyboard.gridLayout.v4"
+    private static let gridLeftKey = "keyboard.gridLeft.v4"
+    private static let gridWidthKey = "keyboard.gridKeysWidth.v4"
+    private static let gridHeightKey = "keyboard.gridHeight.v4"
 
     private static var rememberedGrid: Bool {
         get { UserDefaults.standard.bool(forKey: gridKey) }
@@ -266,6 +266,31 @@ private final class KeyboardHost: UIViewController {
         return nil
     }
 
+    /**
+     * The left edge of the leftmost small thing drawn in the keyboard's area of `layout`: a label,
+     * an image, or any view without views of its own, such as the search glyph, the segments of
+     * the abc/ABC/123 control and the keys' letters. Backgrounds and the views around them are
+     * wider or taller than any of these, and are passed over.
+     */
+    private func leftmostDrawn(in layout: UIView, within area: CGRect) -> CGFloat? {
+        var left: CGFloat?
+        func look(_ view: UIView) {
+            guard !view.isHidden, view.alpha > 0.01 else { return }
+            let leaf = view.subviews.isEmpty || view is UILabel || view is UIImageView
+            if leaf, view !== layout {
+                let frame = view.convert(view.bounds, to: layout)
+                if frame.width >= 4, frame.height >= 4, frame.width <= 300, frame.height <= 200,
+                   frame.maxX > area.minX, frame.minX < area.maxX, frame.minY < area.maxY {
+                    left = min(left ?? frame.minX, frame.minX)
+                }
+            }
+            guard !(view is UILabel) else { return }
+            for subview in view.subviews { look(subview) }
+        }
+        look(layout)
+        return left
+    }
+
     /// Which keyboard tvOS drew, and the box moved when it isn't the one placed for.
     private func detect() {
         guard let window = view.window, presentingViewController != nil else { return }
@@ -300,6 +325,12 @@ private final class KeyboardHost: UIViewController {
         guard let found else { return }
         // The keys' own frames, where tvOS gives them: its keyboard views draw them inset by a margin.
         if found, let fromFocus = focusedKeys(in: layout) { measuredKeys = fromFocus }
+        // What tvOS draws starts further in than either measure, by the room it leaves inside its
+        // keyboard view: the search glyph and the abc/ABC/123 control line up with the first column.
+        if found, let around = measuredKeys, let left = leftmostDrawn(in: layout, within: around),
+           left > around.minX + 4 {
+            measuredKeys = CGRect(x: left, y: around.minY, width: around.maxX - left, height: around.height)
+        }
         var changed = found != grid
         if found, let measuredKeys, measuredKeys.width > 0, measuredKeys.maxY > 0 {
             let rounded = CGRect(x: measuredKeys.minX.rounded(.down), y: 0,
