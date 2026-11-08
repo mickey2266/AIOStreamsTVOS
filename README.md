@@ -155,7 +155,10 @@ With it off, some setups take decoded sound only as stereo. On a TV and soundbar
   stopped, with the TrueHD playing on, it went to multichannel, twice. So the Dolby stops three
   seconds after the first frame while the video plays, and two seconds later a video whose sound
   the Apple TV decodes over more than 2 channels pauses for 0.3 seconds and plays again. The page
-  isn't told about the pause. Measured from a cold link, with the pause five seconds after the
+  isn't told about the pause. On trial: the video loads paused and waits 3 seconds under the Dolby,
+  the page still showing buffering, so the soundbar has switched to it before the video's sound is
+  set up; then it plays while the Dolby still does. If the soundbar then shows multichannel PCM
+  from the start, the pause and play can go. Measured from a cold link, with the pause five seconds after the
   Dolby and a second long: TrueHD showed Dolby during the load, then stereo PCM, then
   multichannel PCM after the pause, about eight seconds in, with about three seconds of silence
   as the soundbar switched. DTS and DTS-HD did the same, and so did a return from the background
