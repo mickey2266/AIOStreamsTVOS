@@ -156,6 +156,12 @@ private final class KeyboardHost: UIViewController {
 
     private let container: Container
     private let box = UIView()
+    /// The layout's mask with the grid keyboard: the box, in the layout's terms.
+    private let clip: UIView = {
+        let view = UIView()
+        view.backgroundColor = .black
+        return view
+    }()
     private let leftOfBox = FocusTrap()
     private var grid = KeyboardHost.rememberedGrid
     private var detectQueued = false
@@ -208,6 +214,35 @@ private final class KeyboardHost: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         leftOfBox.armed = false
+        // tvOS's own lines, as they were, for the next keyboard.
+        for line in hiddenLines.allObjects { line.isHidden = false }
+        hiddenLines.removeAllObjects()
+    }
+
+    /// Lines in tvOS's keyboard window hidden while the grid keyboard shows, put back as it goes.
+    private let hiddenLines = NSHashTable<UIView>.weakObjects()
+
+    /**
+     * tvOS's thin lines that run out past the box's right edge, such as the search field's
+     * underline across the layout's whole width, drawn in its keyboard window, which the layout's
+     * mask doesn't reach: hidden while the grid keyboard shows.
+     */
+    private func hideLinesPastBox(in windows: [UIWindow]) {
+        guard grid, !box.isHidden else { return }
+        let edge = box.frame.maxX
+        let screen: UIView = view
+        func look(_ each: UIView) {
+            guard !each.isHidden else { return }
+            let frame = each.convert(each.bounds, to: screen)
+            if frame.height > 0, frame.height <= 3, frame.width >= 40, frame.maxX > edge + 1,
+               frame.minY < box.frame.maxY, !(each is UILabel) {
+                each.isHidden = true
+                hiddenLines.add(each)
+                return
+            }
+            for subview in each.subviews { look(subview) }
+        }
+        for each in windows where each !== view.window { look(each) }
     }
 
     private func place() {
@@ -226,12 +261,17 @@ private final class KeyboardHost: UIViewController {
             } else {
                 box.isHidden = true
             }
+            // What the layout draws itself, such as the search field's hairline across its whole
+            // width, only inside the box, so none of it shows past the box's edge.
+            clip.frame = box.isHidden ? .zero : view.convert(box.frame, to: container.view)
+            container.view.mask = clip
             let left = box.isHidden ? layout.minX : box.frame.minX
             leftOfBox.frame = CGRect(x: 0, y: 0, width: max(0, left), height: bounds.height)
             leftOfBox.isHidden = false
         } else {
             container.view.frame = bounds
             container.showsBackdrop = true
+            container.view.mask = nil
             box.isHidden = true
             leftOfBox.isHidden = true
         }
@@ -341,7 +381,7 @@ private final class KeyboardHost: UIViewController {
             abs($0.minX - rounded.minX) <= 2 && abs($0.width - rounded.width) <= 2 &&
                 abs($0.maxY - rounded.maxY) <= 2
         } ?? false
-        guard !same else { return }
+        guard !same else { return hideLinesPastBox(in: windows) }
         let had = keys != nil
         keys = rounded
         Self.rememberedDrawn = rounded
@@ -351,6 +391,7 @@ private final class KeyboardHost: UIViewController {
         } else {
             UIView.performWithoutAnimation { self.place() }
         }
+        hideLinesPastBox(in: windows)
     }
 }
 
