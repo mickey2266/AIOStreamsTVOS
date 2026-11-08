@@ -105,17 +105,17 @@ private final class KeyboardHost: UIViewController {
     private static let gridMaxWidth: CGFloat = 960
     private static let gridLayoutWidth: CGFloat = 840
     private static let gridHeight: CGFloat = 860
-    /// Room around the keys, on each side.
+    /// Room around the keys, on the right and below them.
     private static let gridMargin: CGFloat = 32
-    /// The largest a key is, so wider focus items such as the search field aren't measured as keys.
-    private static let keyMaxSize: CGFloat = 200
+    /// Room on the keys' left, a little more, as the search field's glyph starts just left of them.
+    private static let gridLeftRoom: CGFloat = 48
     /// tvOS's own margin from the screen's edge, inside which a TV shows all of the picture.
     private static let gridRightInset: CGFloat = 90
     // New names, so measures an earlier build saved don't place this one's box.
-    private static let gridKey = "keyboard.gridLayout.v4"
-    private static let gridLeftKey = "keyboard.gridLeft.v4"
-    private static let gridWidthKey = "keyboard.gridKeysWidth.v4"
-    private static let gridHeightKey = "keyboard.gridHeight.v4"
+    private static let gridKey = "keyboard.gridLayout.v5"
+    private static let gridLeftKey = "keyboard.gridLeft.v5"
+    private static let gridWidthKey = "keyboard.gridKeysWidth.v5"
+    private static let gridHeightKey = "keyboard.gridHeight.v5"
 
     private static var rememberedGrid: Bool {
         get { UserDefaults.standard.bool(forKey: gridKey) }
@@ -202,7 +202,7 @@ private final class KeyboardHost: UIViewController {
     private func place() {
         let bounds = view.bounds
         if grid {
-            let measured = keys.map { $0.width + 2 * Self.gridMargin } ?? Self.gridFirstWidth
+            let measured = keys.map { $0.width + Self.gridLeftRoom + Self.gridMargin } ?? Self.gridFirstWidth
             let width = min(max(measured, Self.gridMinWidth), Self.gridMaxWidth)
             let tall = keys.map { $0.maxY + Self.gridMargin } ?? Self.gridHeight
             box.frame = CGRect(x: bounds.maxX - Self.gridRightInset - width, y: 0,
@@ -210,7 +210,7 @@ private final class KeyboardHost: UIViewController {
             box.backgroundColor = .black
             // Always laid out the same width, so the keys stay where they were measured; moved left
             // by the space tvOS leaves before them, less the box's margin.
-            let shift = keys.map { Self.gridMargin - $0.minX } ?? 0
+            let shift = keys.map { Self.gridLeftRoom - $0.minX } ?? 0
             container.view.frame = CGRect(x: shift, y: 0, width: Self.gridLayoutWidth,
                                           height: min(Self.gridHeight, bounds.height))
             leftOfBox.frame = CGRect(x: 0, y: 0, width: box.frame.minX, height: bounds.height)
@@ -233,64 +233,6 @@ private final class KeyboardHost: UIViewController {
         }
     }
 
-    /**
-     * The keys' extent in `layout`, from the focus system: the focused key and the focus items
-     * around it, all the keys of one plane once a container holds a dozen or more of them. Nil
-     * while focus isn't on a key in the layout.
-     */
-    private func focusedKeys(in layout: UIView) -> CGRect? {
-        guard let focused = UIFocusSystem.focusSystem(for: layout)?.focusedItem else { return nil }
-        // Only a key of the keyboard in this box, found through the nearest view above it.
-        var holder: UIFocusEnvironment? = focused
-        while let each = holder, !(each is UIView) { holder = each.parentFocusEnvironment }
-        guard let view = holder as? UIView, view.isDescendant(of: layout) else { return nil }
-        var environment: UIFocusEnvironment? = focused.parentFocusEnvironment
-        while let each = environment {
-            if let container = each.focusItemContainer {
-                let space = container.coordinateSpace
-                // Keys only: the search field and other wide items run in from the layout's left edge,
-                // which left the box's space on the left.
-                let items = container.focusItems(in: space.bounds).filter { item in
-                    item.frame.width > 0 && item.frame.height > 0 &&
-                        item.frame.width <= Self.keyMaxSize && item.frame.height <= Self.keyMaxSize
-                }
-                if items.count >= 12 {
-                    let union = items.reduce(CGRect.null) { all, item in
-                        all.union(space.convert(item.frame, to: layout))
-                    }
-                    return union.isNull || union.isEmpty ? nil : union
-                }
-            }
-            environment = each.parentFocusEnvironment
-        }
-        return nil
-    }
-
-    /**
-     * The left edge of the leftmost small thing drawn in the keyboard's area of `layout`: a label,
-     * an image, or any view without views of its own, such as the search glyph, the segments of
-     * the abc/ABC/123 control and the keys' letters. Backgrounds and the views around them are
-     * wider or taller than any of these, and are passed over.
-     */
-    private func leftmostDrawn(in layout: UIView, within area: CGRect) -> CGFloat? {
-        var left: CGFloat?
-        func look(_ view: UIView) {
-            guard !view.isHidden, view.alpha > 0.01 else { return }
-            let leaf = view.subviews.isEmpty || view is UILabel || view is UIImageView
-            if leaf, view !== layout {
-                let frame = view.convert(view.bounds, to: layout)
-                if frame.width >= 4, frame.height >= 4, frame.width <= 300, frame.height <= 200,
-                   frame.maxX > area.minX, frame.minX < area.maxX, frame.minY < area.maxY {
-                    left = min(left ?? frame.minX, frame.minX)
-                }
-            }
-            guard !(view is UILabel) else { return }
-            for subview in view.subviews { look(subview) }
-        }
-        look(layout)
-        return left
-    }
-
     /// Which keyboard tvOS drew, and the box moved when it isn't the one placed for.
     private func detect() {
         guard let window = view.window, presentingViewController != nil else { return }
@@ -308,8 +250,9 @@ private final class KeyboardHost: UIViewController {
                 let size = view.bounds.size
                 if size.height > 320, size.width > 200, size.width < 900 {
                     found = true
-                    // Only a keyboard drawn in the layout itself measures the box.
-                    if view.isDescendant(of: layout), size.width < narrowest {
+                    // tvOS draws the keyboard in a window of its own, placed from the layout, so it's
+                    // measured in the layout's terms wherever it's drawn.
+                    if size.width < narrowest {
                         narrowest = size.width
                         measuredKeys = view.convert(view.bounds, to: layout)
                     }
@@ -324,19 +267,18 @@ private final class KeyboardHost: UIViewController {
         for each in windows { look(each) }
         guard let found else { return }
         let fromView = measuredKeys
-        // The keys' own frames, where tvOS gives them: its keyboard views draw them inset by a margin.
-        let fromFocus = found ? focusedKeys(in: layout) : nil
-        if let fromFocus { measuredKeys = fromFocus }
-        // What tvOS draws starts further in than either measure, by the room it leaves inside its
-        // keyboard view: the search glyph and the abc/ABC/123 control line up with the first column.
-        let drawnLeft = found ? measuredKeys.flatMap { leftmostDrawn(in: layout, within: $0) } : nil
-        if let around = measuredKeys, let left = drawnLeft, left > around.minX + 4 {
-            measuredKeys = CGRect(x: left, y: around.minY, width: around.maxX - left, height: around.height)
+        // The keyboard focus is on, where it's one of tvOS's keyboard views: the one that holds the keys.
+        let focused = UIFocusSystem.focusSystem(for: layout)?.focusedItem
+        var fromFocus: CGRect?
+        if found, let keyboard = focused as? UIView, String(describing: type(of: keyboard)).contains("Keyboard") {
+            let frame = keyboard.convert(keyboard.bounds, to: layout)
+            if frame.height > 320, frame.width > 200, frame.width < 900 { fromFocus = frame }
         }
+        if let fromFocus { measuredKeys = fromFocus }
         if found {
             KeyboardReport.record(
-                layout: layout, fromView: fromView, fromFocus: fromFocus, drawnLeft: drawnLeft,
-                used: measuredKeys, box: box.frame, focused: UIFocusSystem.focusSystem(for: layout)?.focusedItem
+                layout: layout, fromView: fromView, fromFocus: fromFocus,
+                used: measuredKeys, box: box.frame, focused: focused
             )
         }
         var changed = found != grid
@@ -382,15 +324,14 @@ enum KeyboardReport {
     }
 
     fileprivate static func record(
-        layout: UIView, fromView: CGRect?, fromFocus: CGRect?, drawnLeft: CGFloat?,
+        layout: UIView, fromView: CGRect?, fromFocus: CGRect?,
         used: CGRect?, box: CGRect, focused: UIFocusItem?
     ) {
         var out = [
             "Grid keyboard, last measured \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)):",
             "Layout: \(text(layout.frame)) in the box; box \(text(box)) on screen",
-            "Keyboard view: \(text(fromView))",
-            "Keys from focus: \(text(fromFocus))",
-            "Leftmost drawn: \(drawnLeft.map { String(format: "x %.0f", $0) } ?? "none")",
+            "Narrowest keyboard view: \(text(fromView))",
+            "Focused keyboard view: \(text(fromFocus))",
             "Used: \(text(used))",
         ]
         if let focused {
