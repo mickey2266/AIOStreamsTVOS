@@ -73,6 +73,8 @@ final class AetherPlayer {
     private var health = PlaybackHealth()
     /// The source connection the file opened with, which a change in the menu leaves as it is.
     private var openedHeld = false
+    /// The file is loading, or playing, again as live after AVPlayer gave up on it (`failed`), so it isn't again.
+    private var reloadedAsLive = false
 
     /// A URL for the log: its host and the end of its path, without the query, where tokens go.
     static func shortened(_ url: URL) -> String {
@@ -135,8 +137,10 @@ final class AetherPlayer {
         start(request)
     }
 
-    private func start(_ request: LoadRequest) {
+    /// `asLive`: loaded again as live after AVPlayer gave up on it as a finished video (`failed`).
+    private func start(_ request: LoadRequest, asLive: Bool = false) {
         guard let url = URL(string: request.url) else { return }
+        reloadedAsLive = asLive
         if current != nil, !ended { listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil) }
         generation += 1
         let generation = generation
@@ -166,13 +170,15 @@ final class AetherPlayer {
                 AudioOutput.startPrimer()
             }
             // A live playlist has to be declared to the engine (`LiveHLS`); it plays from the live edge.
-            var live = false
-            if !request.isTrailer, LiveHLS.mayBePlaylist(url) {
+            var live = asLive
+            if !live, !request.isTrailer {
                 let verdict = await LiveHLS.check(url, headers: request.headers)
                 guard generation == self.generation else { return }
                 live = verdict.live
                 EngineLogBook.note("[player] live check: \(verdict.reason) (\(Self.shortened(url)))")
             }
+            guard generation == self.generation else { return }
+            if asLive { EngineLogBook.note("[player] loading again as live (\(Self.shortened(url)))") }
             do {
                 try await self.engine.load(
                     url: url,
@@ -194,8 +200,9 @@ final class AetherPlayer {
     private func options(for request: LoadRequest, live: Bool) -> LoadOptions {
         var options = LoadOptions()
         options.httpHeaders = request.headers
-        // The engine takes a live `.m3u8` straight onto its own HLS reader (AE#678), which puts the headers on
-        // every playlist and segment request; without this it plays the playlist in AVPlayer as a finished one.
+        // The engine takes a live playlist onto its own HLS reader, which puts the headers on every playlist
+        // and segment request: a `.m3u8` at once, any other address once it answers with a playlist (AE#363).
+        // Without this it plays the playlist in AVPlayer as a finished one.
         options.isLive = live
         // Held for the link, it plays from `releaseHold` instead.
         options.autoplay = !paused && !holdingForLink
@@ -382,6 +389,15 @@ final class AetherPlayer {
     private func failed(_ error: String) {
         guard !ended else { return }
         ended = true
+        // An HLS playlist the live check took for a finished video, which AVPlayer then gave up on, as it
+        // does on a live one it's told is finished: once more as live, before the page hears of it.
+        // A finished HLS that knows its length failed for its own reasons, and goes to the page.
+        if !reloadedAsLive, !engine.isLive, engine.videoRoute == .remoteBypass, !(engine.duration > 0),
+           let request = current, !request.isTrailer {
+            EngineLogBook.note("[player] AVPlayer gave up on the HLS as a finished video: \(error)")
+            start(request, asLive: true)
+            return
+        }
         let info = engine.errorInfo
         var status: Int?
         if let code = info?.underlyingCode, (400..<600).contains(code),
