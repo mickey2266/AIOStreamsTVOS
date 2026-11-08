@@ -47,12 +47,6 @@ final class AetherPlayer {
     private var generation = 0
     /// The pause and play of `settleAudio` is under way, so the page isn't told about it.
     private var reopening = false
-    /**
-     * The video has loaded paused and waits for the HDMI link to widen under the Dolby primer before
-     * it plays (`holdForLink`), so its sound is set up on the wide link: the page sees buffering, as
-     * during the load, rather than a paused video.
-     */
-    private var holdingForLink = false
 
     /// The file loaded or loading, and the one to play after it.
     private(set) var current: LoadRequest?
@@ -145,8 +139,6 @@ final class AetherPlayer {
         subtitles.reset()
         listener?.playerEvent("start")
         listener?.playerState(["idle": false, "buffering": true, "positionMs": request.startMs])
-        // With the primer, the video loads paused and starts once the link is wide (`holdForLink`).
-        holdingForLink = primes
         loading?.cancel()
         loading = Task { [weak self] in
             await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
@@ -180,8 +172,7 @@ final class AetherPlayer {
     private func options(for request: LoadRequest) -> LoadOptions {
         var options = LoadOptions()
         options.httpHeaders = request.headers
-        // Held for the link, it plays from `releaseHold` instead.
-        options.autoplay = !paused && !holdingForLink
+        options.autoplay = !paused
         options.preferredAudioLanguages = request.audioLanguages
         // Matching tracks are confirmed as Atmos in the background, for the track names and the statistics.
         // The engine would skip the pass on a held source connection (the default here), which it reads
@@ -287,77 +278,6 @@ final class AetherPlayer {
         reportChapters()
         if engine.duration > 0 { listener?.playerState(["durationMs": engine.duration * 1000]) }
         listener?.playerEvent("loaded")
-        if holdingForLink { holdForLink() }
-    }
-
-    /**
-     * How long the start is held for the soundbar to take the Dolby and widen the link, and how often
-     * the session is looked at meanwhile. The session has read 2 channels on a wide link too (the
-     * README's measurements), so the hold is usually all of this: an early start is for a route that
-     * does report its width. On trial, like the pause and play after it.
-     */
-    private static let holdLongest: TimeInterval = 3
-    private static let holdLook: TimeInterval = 0.25
-
-    /// Sound the Apple TV decodes into more than 2 channels of PCM, which a stereo link downmixes.
-    private var decodedChannels: Int? {
-        guard let audio = activeAudio else { return nil }
-        let decoded = engine.audioDelivery == .decoded
-            || (engine.audioDelivery == .bridged && engine.loadedAudioIsLossless)
-        var sent = audio.channels
-        if let limit = shaping.maxChannels { sent = min(sent, limit) }
-        return decoded && sent > 2 ? sent : nil
-    }
-
-    /**
-     * The video has loaded paused, the Dolby primer playing since before the load. Sound the Apple TV
-     * decodes into more than 2 channels waits `holdLongest`, the page still showing buffering, for the
-     * soundbar to take the Dolby and widen the link (sooner if the session's output says it has more
-     * than 2 channels); then the video plays while the Dolby still does, so its sound is set up on the
-     * wide link rather than at the stereo it found. Everything else plays at once. The pause and play
-     * after the Dolby (`settleAudio`) stays as the fallback until the soundbar shows it isn't needed.
-     */
-    private func holdForLink() {
-        guard let sent = decodedChannels, AudioOutput.routeIsHDMI, AudioOutput.primerPlaying else {
-            return releaseHold(note: nil)
-        }
-        let generation = generation
-        let began = ProcessInfo.processInfo.systemUptime
-        func look() {
-            guard generation == self.generation, holdingForLink, current != nil, !ended else { return }
-            let waited = ProcessInfo.processInfo.systemUptime - began
-            let inUse = AudioOutput.channelsInUse
-            let held = String(format: "%.1f", waited)
-            if inUse > 2 {
-                releaseHold(note: "held the start \(held) s, until the link had \(inUse) ch (\(sent) ch track)")
-            } else if waited >= Self.holdLongest {
-                releaseHold(note: "held the start \(held) s under the Dolby; the session read \(inUse) ch of "
-                    + "\(AudioOutput.channelsAvailable) (\(sent) ch track)")
-            } else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.holdLook) { look() }
-            }
-        }
-        look()
-    }
-
-    /// Ends the hold: the video plays (unless the page paused it meanwhile), and its first picture counts.
-    private func releaseHold(note: String?) {
-        guard holdingForLink else { return }
-        holdingForLink = false
-        if let note { AudioOutput.notePrimer(note) }
-        if !paused { engine.play() }
-        if engine.hasFirstFrameReadyForDisplay { firstFrameShown() }
-    }
-
-    /// The video shows its first picture and plays: the page stops showing buffering.
-    private func firstFrameShown() {
-        // The HDMI link widens from its idle stereo once sound plays (Continuous Audio Connection off).
-        AudioOutput.playbackStarted()
-        // The video's own sound plays alongside the Dolby, then alone, then is paused and played if the
-        // link is still at stereo.
-        settleAudio(after: 3)
-        listener?.playerState(["buffering": false, "paused": paused])
-        listener?.playerEvent("restart")
     }
 
     private func failed(_ error: String) {
@@ -370,7 +290,6 @@ final class AetherPlayer {
             status = code
         }
         NSLog("[player] failed: %@ (%@)", error, info.map { "\($0.kind.rawValue)" } ?? "no kind")
-        holdingForLink = false
         AudioOutput.stopPrimer(after: 0)
         listener?.playerEnded(reason: "error", error: error, cause: info?.message, status: status)
         listener?.playerState(["idle": true, "buffering": false])
@@ -378,7 +297,6 @@ final class AetherPlayer {
 
     func stop() {
         generation += 1
-        holdingForLink = false
         loading?.cancel()
         loading = nil
         queued = nil
@@ -396,8 +314,7 @@ final class AetherPlayer {
     func change(_ change: Change) {
         if let paused = change.paused {
             self.paused = paused
-            // Held for the link, play waits for `releaseHold`, which reads `paused`.
-            if current != nil, !holdingForLink {
+            if current != nil {
                 if paused { engine.pause() } else { engine.play() }
             }
             listener?.playerState(["paused": paused])
@@ -560,8 +477,7 @@ final class AetherPlayer {
         engine.$isBuffering
             .removeDuplicates()
             .sink { [weak self] buffering in
-                // Held for the link, the page goes on seeing the load's buffering.
-                guard let self, self.current != nil, !self.ended, !self.holdingForLink else { return }
+                guard let self, self.current != nil, !self.ended else { return }
                 self.listener?.playerState(["buffering": buffering])
                 // Waiting for data mid-play; a seek, a load and a track switch's reload wait too, by design.
                 if buffering, self.engine.hasFirstFrameReadyForDisplay, !self.engine.isSeeking,
@@ -591,9 +507,13 @@ final class AetherPlayer {
         engine.$hasFirstFrameReadyForDisplay
             .removeDuplicates()
             .sink { [weak self] ready in
-                // Held for the link, the first picture counts once the video plays (`releaseHold`).
-                guard let self, ready, self.current != nil, !self.ended, !self.holdingForLink else { return }
-                self.firstFrameShown()
+                guard let self, ready, self.current != nil, !self.ended else { return }
+                // The HDMI link widens from its idle stereo once sound plays (Continuous Audio Connection off).
+                AudioOutput.playbackStarted()
+                // The video's own sound plays alongside the Dolby, then alone, then is paused and played.
+                self.settleAudio(after: 3)
+                self.listener?.playerState(["buffering": false])
+                self.listener?.playerEvent("restart")
             }
             .store(in: &watching)
         engine.$duration
@@ -700,13 +620,6 @@ final class AetherPlayer {
             var sent = audio.channels
             if let limit = self.shaping.maxChannels { sent = min(sent, limit) }
             guard decoded, sent > 2 else { return }
-            // A session that reports the link wide needs no pause and play; one reading 2 may be wide
-            // too (the README's measurements), so it still gets one.
-            let inUse = AudioOutput.channelsInUse
-            guard inUse <= 2 else {
-                AudioOutput.notePrimer("no pause and play: the link has \(inUse) ch after the Dolby")
-                return
-            }
             self.reopening = true
             self.engine.pause()
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.reopenPause) { [weak self] in
@@ -727,8 +640,6 @@ final class AetherPlayer {
 
     private func stateChanged(_ state: PlaybackState) {
         guard current != nil, !ended else { return }
-        // Loaded paused for the link: buffering to the page, not paused.
-        if holdingForLink, case .paused = state { return }
         // `settleAudio`'s own pause and play.
         if reopening {
             switch state {

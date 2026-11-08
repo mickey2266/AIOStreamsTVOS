@@ -76,12 +76,6 @@ enum AudioOutput {
         queue.async { widenNow() }
     }
 
-    /// The channels the session's output has now: 2 while the HDMI link idles at stereo.
-    static var channelsInUse: Int { AVAudioSession.sharedInstance().outputNumberOfChannels }
-
-    /// The most channels the route takes, which is more than 2 on a multichannel link even while it idles.
-    static var channelsAvailable: Int { AVAudioSession.sharedInstance().maximumOutputNumberOfChannels }
-
     // MARK: Dolby primer
 
     private static var primer: AVQueuePlayer?
@@ -93,9 +87,6 @@ enum AudioOutput {
     private static var primerPlayed = false
     /// What the primer last did, for the app menu and the diagnostics. Main thread only.
     static private(set) var lastPrime: String?
-
-    /// The primer is playing (or starting), so a video can wait on the link it widens.
-    static var primerPlaying: Bool { primer != nil }
 
     /// The most the primer plays if the video never shows a frame (a failed or very slow load).
     private static let primerLongest: TimeInterval = 30
