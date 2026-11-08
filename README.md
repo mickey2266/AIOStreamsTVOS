@@ -404,6 +404,20 @@ Back behaviour and the bundled-player path. It also means:
   cards only once a scroll has stopped, or after 0.7 seconds of a held key
   (`patches/web/0016-tvos-home-rows-draw-between-scrolls.patch`), rather than all twenty at once in
   the middle of one.
+- A home row's name is a link to its whole catalog in Discover, which the page's remote navigation
+  skips. Here it's a stop of its own above the row's posters: Up from any of them goes to it, Down
+  into the row from above lands on it first, and Click opens the catalog
+  (`patches/web/0018-tvos-row-titles-open-catalog.patch`).
+- With **Infuse** as the player (Settings → Playback → Player), the link names the video by its title,
+  with the episode for an episode, rather than the file's name:
+  `infuse://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}`
+  (`patches/web/0019-tvos-infuse-link-names-the-title.patch`). Infuse opens the `aiostreams://` link
+  in `x-success` when it's done, and the page saves where it stopped.
+- **SenPlayer** and **VidHub** are players to pick there too, with links of the same kind
+  (`patches/web/0020-tvos-senplayer-and-vidhub.patch`):
+  `SenPlayer://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&sub={subtitles}&name={title}&position={position}`
+  and
+  `open-vidhub://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}`.
 
   **Hardware decoding** always shows, where the page hid it while a stored engine setting said
   ExoPlayer.
@@ -426,7 +440,7 @@ Back behaviour and the bundled-player path. It also means:
 | ----------------------------------- | ------------------------------------------------- |
 | Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe up or down moves one row, or two when it's long; across, it moves as many posters as its length; an edge the swipe starts or ends on adds no arrow of its own; Left from a row's or a grid line's first poster opens the navigation)|
 | Click                               | Enter (held, the page's hold actions)             |
-| Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving down closes it. Passwords and PINs get the keyboard in an alert |
+| Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving off the keys closes it. The linear keyboard keeps tvOS's full-screen layout over a black backdrop, with the page showing in the space below it. The grid keyboard (Settings → General → Keyboard) sits in a black box at the screen's top right, its keys' width as measured from what tvOS draws, with the page to its left. Passwords and PINs get the keyboard in an alert |
 | Click in a searchable list          | The pickers with up and down carets, such as Discover's catalog picker: picks the highlighted entry, including the one highlighted as the list opens or after a search; opens the keyboard only when nothing is left to pick |
 | Up from a searchable list's top entry | Opens the keyboard to search (a held Up, or a quick run of presses, stops at the top instead) |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |

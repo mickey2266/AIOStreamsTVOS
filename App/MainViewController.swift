@@ -328,6 +328,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines += PictureInPicture.report
         lines.append("")
         lines += TopShelf.report
+        lines.append("")
+        lines += KeyboardReport.lines
         let held = AetherPlayer.heldSourceConnection
         let priming = AudioOutput.primerEnabled
         let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
