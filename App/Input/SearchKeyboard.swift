@@ -323,13 +323,21 @@ private final class KeyboardHost: UIViewController {
         let windows = window.windowScene?.windows ?? [window]
         for each in windows { look(each) }
         guard let found else { return }
+        let fromView = measuredKeys
         // The keys' own frames, where tvOS gives them: its keyboard views draw them inset by a margin.
-        if found, let fromFocus = focusedKeys(in: layout) { measuredKeys = fromFocus }
+        let fromFocus = found ? focusedKeys(in: layout) : nil
+        if let fromFocus { measuredKeys = fromFocus }
         // What tvOS draws starts further in than either measure, by the room it leaves inside its
         // keyboard view: the search glyph and the abc/ABC/123 control line up with the first column.
-        if found, let around = measuredKeys, let left = leftmostDrawn(in: layout, within: around),
-           left > around.minX + 4 {
+        let drawnLeft = found ? measuredKeys.flatMap { leftmostDrawn(in: layout, within: $0) } : nil
+        if let around = measuredKeys, let left = drawnLeft, left > around.minX + 4 {
             measuredKeys = CGRect(x: left, y: around.minY, width: around.maxX - left, height: around.height)
+        }
+        if found {
+            KeyboardReport.record(
+                layout: layout, fromView: fromView, fromFocus: fromFocus, drawnLeft: drawnLeft,
+                used: measuredKeys, box: box.frame, focused: UIFocusSystem.focusSystem(for: layout)?.focusedItem
+            )
         }
         var changed = found != grid
         if found, let measuredKeys, measuredKeys.width > 0, measuredKeys.maxY > 0 {
@@ -356,6 +364,63 @@ private final class KeyboardHost: UIViewController {
             // Measured again where the move left the keys.
             self?.detectSoon()
         })
+    }
+}
+
+/**
+ * What the grid keyboard's box was last measured from, for the app menu (hold
+ * Play/Pause): the measures tried, the one used, the box, the focused key, and
+ * the views drawn at the keyboard's left, leftmost first. In points, in the
+ * keyboard's layout, which the box shows from the measured left edge.
+ */
+enum KeyboardReport {
+    private(set) static var lines: [String] = ["Grid keyboard: not measured since the app started"]
+
+    private static func text(_ rect: CGRect?) -> String {
+        guard let rect else { return "none" }
+        return String(format: "x %.0f, y %.0f, %.0f × %.0f", rect.minX, rect.minY, rect.width, rect.height)
+    }
+
+    fileprivate static func record(
+        layout: UIView, fromView: CGRect?, fromFocus: CGRect?, drawnLeft: CGFloat?,
+        used: CGRect?, box: CGRect, focused: UIFocusItem?
+    ) {
+        var out = [
+            "Grid keyboard, last measured \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)):",
+            "Layout: \(text(layout.frame)) in the box; box \(text(box)) on screen",
+            "Keyboard view: \(text(fromView))",
+            "Keys from focus: \(text(fromFocus))",
+            "Leftmost drawn: \(drawnLeft.map { String(format: "x %.0f", $0) } ?? "none")",
+            "Used: \(text(used))",
+        ]
+        if let focused {
+            var frame = focused.frame
+            if let view = focused as? UIView {
+                frame = view.convert(view.bounds, to: layout)
+            } else if let space = focused.parentFocusEnvironment?.focusItemContainer?.coordinateSpace {
+                frame = space.convert(focused.frame, to: layout)
+            }
+            out.append("Focused: \(String(describing: type(of: focused))) \(text(frame))")
+        }
+        // The views at the keyboard's left, to see what starts where.
+        var views: [(CGRect, String)] = []
+        func look(_ view: UIView, depth: Int) {
+            guard !view.isHidden, view.alpha > 0.01, depth < 40 else { return }
+            if view !== layout {
+                let frame = view.convert(view.bounds, to: layout)
+                if frame.width >= 2, frame.height >= 2, frame.minY < 700 {
+                    let name = String(describing: type(of: view))
+                    views.append((frame, "\(name)\(view.subviews.isEmpty ? "" : " [\(view.subviews.count)]")"))
+                }
+            }
+            for subview in view.subviews { look(subview, depth: depth + 1) }
+        }
+        look(layout, depth: 0)
+        views.sort { $0.0.minX < $1.0.minX }
+        out.append("Views, leftmost first (\(views.count)):")
+        for (frame, name) in views.prefix(40) { out.append("  \(text(frame)) \(name)") }
+        lines = out
+        NSLog("[keyboard] %@", out.joined(separator: " | "))
     }
 }
 
