@@ -351,6 +351,11 @@ final class AetherPlayer {
             start(request, onAVPlayer: true)
             return
         }
+        // Whether a channel that starts frozen was loaded paused by the app or stopped on its own.
+        if engine.isLive {
+            EngineLogBook.note("[player] live channel loaded on \(liveOnAVPlayer ? "AVPlayer" : "\(engine.videoRoute)"), "
+                + "\(paused ? "paused, as the page last asked" : "playing"), engine \(engine.state)")
+        }
         if paused { engine.pause() }
         if speed != 1 { engine.setRate(Float(speed)) }
         applyVolume()
@@ -363,19 +368,23 @@ final class AetherPlayer {
         if engine.duration > 0 { listener?.playerState(["durationMs": engine.duration * 1000]) }
         listener?.playerEvent("loaded")
         if holdingForLink { holdForLink() }
-        if liveOnAVPlayer { nudgeFrozenLiveStart() }
+        if engine.isLive { nudgeFrozenLiveStart() }
     }
 
     /**
-     * A live channel loaded again on AVPlayer for its sound (`liveOnAVPlayer`) starts frozen on its first
-     * picture, and plays, with sound, after a pause and play. The app does that pause and play itself,
-     * once, `frozenStartWait` after the load, unless the page has paused it.
+     * A live channel can start frozen on its first picture and play, with sound, after a pause and play.
+     * The app does that pause and play itself, once, `frozenStartWait` after the load, unless the page
+     * has paused it: on AVPlayer (`liveOnAVPlayer`) always, as its clock may move while the picture holds;
+     * on the engine's own reader when the clock hasn't moved. A channel there froze too (Nov 9 report:
+     * software decode, joined at a keyframe, its clock armed at the join and still there, 0.0 Mbps from
+     * the source since), so the nudge isn't AVPlayer's alone. The engine's `play()` also takes a live
+     * playhead behind the window to it, which a pause and play by hand did.
      *
      * The first try (7fda951) went to the live edge and played, and only when the clock had moved under
      * half a second: it didn't unfreeze the channel. Likely reasons, from the engine's code: on AVPlayer's
      * own playlist reading the edge seek returns early when the engine has no live window, `play()` on an
-     * AVPlayer already at rate 1 changes nothing, and the clock may move while the picture holds. A pause and play is what the viewer does,
-     * so it goes whether or not the clock moved, which the log line keeps for the report.
+     * AVPlayer already at rate 1 changes nothing, and the clock may move while the picture holds. A
+     * pause and play is what the viewer does, and the log lines keep how far the clock moved.
      */
     private func nudgeFrozenLiveStart() {
         let generation = generation
@@ -385,8 +394,11 @@ final class AetherPlayer {
             guard let self, generation == self.generation, self.current != nil, !self.ended,
                   !self.paused, !self.holdingForLink, !self.reopening else { return }
             let moved = self.engine.clock.currentTime - startedAt
-            EngineLogBook.note(String(format: "[player] the live channel on AVPlayer moved %.1f s in %.0f s (%@, %@); pausing and playing it once",
-                                      moved, Self.frozenStartWait, "\(self.engine.state)",
+            let route = self.liveOnAVPlayer ? "AVPlayer" : "\(self.engine.videoRoute)"
+            // The engine's own reader moves its clock only as it plays, so a moving one is playing.
+            guard self.liveOnAVPlayer || moved < Self.frozenMoveSeconds else { return }
+            EngineLogBook.note(String(format: "[player] the live channel on %@ moved %.1f s in %.0f s (%@, %@); pausing and playing it once",
+                                      route, moved, Self.frozenStartWait, "\(self.engine.state)",
                                       self.engine.isBuffering ? "buffering" : "not buffering"))
             // Hidden from the page, as `settleAudio`'s pause and play is.
             self.reopening = true
@@ -409,10 +421,12 @@ final class AetherPlayer {
         }
     }
 
-    /// How long a live channel reloaded on AVPlayer plays before the app pauses and plays it.
+    /// How long a live channel plays after its load before the app pauses and plays it.
     private static let frozenStartWait: TimeInterval = 3
     /// The pause between, about a viewer's press and press again.
     private static let frozenPauseSeconds: TimeInterval = 0.5
+    /// Less than this in `frozenStartWait`, on the engine's own reader, and the channel hasn't started.
+    private static let frozenMoveSeconds: TimeInterval = 0.5
 
     /**
      * How long the start is held for the soundbar to take the Dolby and widen the link, and how often
