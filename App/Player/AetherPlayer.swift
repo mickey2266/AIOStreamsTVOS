@@ -167,7 +167,15 @@ final class AetherPlayer {
         // With the primer, the video loads paused and starts once the link is wide (`holdForLink`).
         holdingForLink = primes
         loading?.cancel()
+        // A live stream has to be declared to the engine; it plays from the live edge. A Live TV channel
+        // comes declared by the page, which spares it `LiveHLS`'s requests (the master playlist, then its
+        // first variant, each on a connection of its own, before the engine asks for them again) and plays
+        // a raw MPEG-TS channel, which isn't a playlist, as live too. Anything else that could be a playlist
+        // is asked, alongside the audio session's activation rather than after it.
+        let declaredLive = asLive || request.live
+        let checks = !declaredLive && !request.isTrailer && LiveHLS.mayBePlaylist(url)
         loading = Task { [weak self] in
+            async let checked: LiveHLS.Verdict? = checks ? LiveHLS.check(url, headers: request.headers) : nil
             await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
             guard let self, generation == self.generation else { return }
             // Silent Dolby through the load, until the video's sound has started, so decoded
@@ -178,13 +186,13 @@ final class AetherPlayer {
             } else {
                 AudioOutput.startPrimer()
             }
-            // A live playlist has to be declared to the engine (`LiveHLS`); it plays from the live edge.
-            var live = asLive
-            if !live, !request.isTrailer {
-                let verdict = await LiveHLS.check(url, headers: request.headers)
+            var live = declaredLive
+            if let verdict = await checked {
                 guard generation == self.generation else { return }
                 live = verdict.live
                 EngineLogBook.note("[player] live check: \(verdict.reason) (\(Self.shortened(url)))")
+            } else if request.live, !asLive {
+                EngineLogBook.note("[player] live: the page says so (\(Self.shortened(url)))")
             }
             guard generation == self.generation else { return }
             if asLive { EngineLogBook.note("[player] loading again as live (\(Self.shortened(url)))") }
@@ -213,6 +221,11 @@ final class AetherPlayer {
         // and segment request: a `.m3u8` at once, any other address once it answers with a playlist (AE#363).
         // Without this it plays the playlist in AVPlayer as a finished one.
         options.isLive = live
+        // The open reads the stream until each of its tracks is known, for up to 60 s of it by the engine's
+        // default. A live stream comes at the speed it plays, so a channel with a track that never sends
+        // (an unused audio language, empty teletext) held its first picture for all of it: raw MPEG-TS most,
+        // where the open reads the broadcast itself. FFmpeg's own 5 s, which mpv plays channels with.
+        if live { options.maxAnalyzeDuration = Self.liveAnalyzeMicroseconds }
         // Held for the link, it plays from `releaseHold` instead.
         options.autoplay = !paused && !holdingForLink
         options.preferredAudioLanguages = request.audioLanguages
@@ -290,6 +303,9 @@ final class AetherPlayer {
         options.prepareNativeSubtitles = true
         return options
     }
+
+    /// How much of a live stream the open may read to learn its tracks, in microseconds (`options`).
+    private static let liveAnalyzeMicroseconds: Int64 = 5 * 1_000_000
 
     /// The engine's largest forward window (about 3 hours of 4 s segments): with a Cache size set, the
     /// bytes bound the buffer, not this.

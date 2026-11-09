@@ -25,6 +25,9 @@ struct LoadRequest {
     let audioLanguages: [String]
     let subtitleLanguages: [String]
     let subtitleMode: SubtitleMode
+    /// The server says it's live (a Live TV channel's `IsInfiniteStream`). False isn't a promise: an
+    /// add-on's stream may be live without saying so, which `LiveHLS` finds out.
+    let live: Bool
 
     /// A trailer, from YouTube (`YouTube.resolve`), whose streams all come from googlevideo.com.
     var isTrailer: Bool {
@@ -116,7 +119,8 @@ enum PlayerProtocol {
             append: message.flag("append") == true,
             audioLanguages: try languages(message["audioLanguages"]),
             subtitleLanguages: try languages(message["subtitleLanguages"]),
-            subtitleMode: message.text("subtitleMode").flatMap(SubtitleMode.init(rawValue:)) ?? .default
+            subtitleMode: message.text("subtitleMode").flatMap(SubtitleMode.init(rawValue:)) ?? .default,
+            live: message.flag("live") == true
         )
     }
 

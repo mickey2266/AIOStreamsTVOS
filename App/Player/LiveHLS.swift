@@ -2,8 +2,9 @@ import Foundation
 
 /**
  * Whether a video is a live HLS stream. The engine plays live only when it's
- * told (`LoadOptions.isLive`: it doesn't guess from a missing duration), and the
- * page's `player-load` doesn't say. Told nothing, the engine takes a live
+ * told (`LoadOptions.isLive`: it doesn't guess from a missing duration). The
+ * page's `player-load` says so for a Live TV channel (`live`), which then
+ * skips this; an add-on's live stream can come unflagged. Told nothing, the engine takes a live
  * playlist for a finished one and hands it to AVPlayer as one: no live edge,
  * and no move to its own HLS reader when AVPlayer can't show the picture
  * (HEVC in MPEG-TS, common on IPTV). AVPlayer then gives up on it, and the
@@ -43,6 +44,20 @@ enum LiveHLS {
         case playlist(String, URL)
         case notPlaylist(String)
     }
+
+    /**
+     * Whether the address could be a playlist, so `check` is worth its request: not when the path
+     * ends in a video file's own extension, as a debrid service's and a server's file links do.
+     * `.ts` isn't one of them, as an IPTV channel is often raw MPEG-TS at such an address.
+     */
+    static func mayBePlaylist(_ url: URL) -> Bool {
+        !fileExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    private static let fileExtensions: Set<String> = [
+        "mkv", "mk3d", "mp4", "m4v", "mov", "avi", "webm", "wmv", "flv", "mpg", "mpeg", "m2ts", "mts",
+        "vob", "iso", "ogv", "3gp",
+    ]
 
     static func check(_ url: URL, headers: [String: String]) async -> Verdict {
         do {
