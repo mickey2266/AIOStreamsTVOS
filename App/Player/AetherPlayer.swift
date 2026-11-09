@@ -252,9 +252,9 @@ final class AetherPlayer {
         // tvOS 26 and later, at 48 kHz, and not with any shaping (stereo, 5.1, dialogue boost, night
         // mode); the rest keeps the 7.1 above. With it on, the engine's automatic audio pick also
         // prefers a TrueHD Atmos or DTS:X track over another format in the same language. On the
-        // engine's software player (AV1, VP9, interlaced H.264, Hardware decoding off) the same setting
-        // also hands an E-AC-3 Atmos track to tvOS's renderer compressed, which played nothing when
-        // tried (de850fa), so with the switch on that one case may be silent.
+        // engine's software player (AV1, VP9, interlaced H.264, Hardware decoding off) an E-AC-3 Atmos
+        // track used to go to tvOS's renderer compressed, which played nothing (de850fa); since engine
+        // 7.59 (AE#995) tvOS's own Atmos decoder renders it into the speaker bed, as TrueHD Atmos is.
         // Only with the page's Audio channels on Automatic, the one setting the page shows the switch
         // under: 7.1 is a limit too, and plays their 7.1; Stereo and 5.1 shape the sound, which the
         // engine would put ahead of the render anyway.
