@@ -239,6 +239,12 @@ enum AppAnswers {
         let matching = window.map { $0.avDisplayManager.isDisplayCriteriaMatchingEnabled ? "on" : "off" } ?? "unknown"
         var lines = player?.report ?? ["Player: not started"]
         lines.append("Match Content: \(matching)")
+        let stalls = EngineLogBook.recentStalls
+        if !stalls.isEmpty {
+            lines.append("")
+            lines.append("Last \(stalls.count) stalls across videos, newest last:")
+            lines += stalls
+        }
         let audio = EngineLogBook.recentAudio
         if !audio.isEmpty {
             lines.append("")

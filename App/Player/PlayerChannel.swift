@@ -124,6 +124,11 @@ final class PlayerChannel: PlayerListener {
             case "now-playing":
                 let item = message.object("item")
                 nowPlaying.setItem(item)
+                // Kept when the page clears it as the video closes, to name the last video's report.
+                if let title = item?.text("title") {
+                    let subtitle = item?.text("subtitle").map { " · \($0)" } ?? ""
+                    player.title = title + subtitle
+                }
                 if item == nil { showVideo(false) }
             case "player-thumbnail":
                 let url = message.text("url") ?? ""

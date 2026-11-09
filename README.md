@@ -198,8 +198,11 @@ picture falling behind. Those figures cover the last 30 s, so the report also li
 stalls with the figures as they stood when each began, where in the video it was, and a verdict from
 them: ran out of data (the source delivered less than the video plays at, or the buffer ran empty),
 the picture fell behind with the buffer full, the engine's reader restarted, or the software player,
-which keeps only 96 MB ahead. Each stall's line also goes into the engine's log in the app menu, which
-keeps it after the video. The source is read over one held connection by default (AetherEngine's
+which keeps only 96 MB ahead. The last 10 stalls across videos are also listed apart from the engine's
+log, with the time and the video, so its audio and loading lines can't push them out. Once a video
+stops, ends or fails, the report keeps it as **Last video**: its name, how it ended and where, its
+tracks, route, playback health and stalls as they stood then. It shows while nothing plays, and stays
+until another video stops or the app quits. The engine's log itself keeps only its last 20 audio and loading lines. The source is read over one held connection by default (AetherEngine's
 `heldSourceConnection`, HTTP/1.1 only), rather than ranged requests that start again at least
 every 128 MB, every dozen seconds of a remux. Either way, a connection that runs below the video's
 average rate for 8 seconds while the player waits on it is replaced by a new one (three in a row,

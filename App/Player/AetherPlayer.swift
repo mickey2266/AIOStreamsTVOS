@@ -141,7 +141,12 @@ final class AetherPlayer {
     private func start(_ request: LoadRequest, asLive: Bool = false) {
         guard let url = URL(string: request.url) else { return }
         reloadedAsLive = asLive
-        if current != nil, !ended { listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil) }
+        if current != nil, !ended {
+            keepLastVideo(ending: asLive ? "loaded again as live" : "another video took its place")
+            listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil)
+        }
+        // The page names the new video once it starts (`now-playing`).
+        if !asLive { title = nil }
         generation += 1
         let generation = generation
         current = request
@@ -392,6 +397,7 @@ final class AetherPlayer {
 
     private func failed(_ error: String) {
         guard !ended else { return }
+        keepLastVideo(ending: "failed: \(error)")
         ended = true
         // An HLS playlist the live check took for a finished video, which AVPlayer then gave up on, as it
         // does on a live one it's told is finished: once more as live, before the page hears of it.
@@ -422,6 +428,7 @@ final class AetherPlayer {
         loading = nil
         queued = nil
         let wasPlaying = current != nil && !ended
+        if wasPlaying { keepLastVideo(ending: "stopped") }
         endLineWatch()
         current = nil
         ended = true
@@ -608,7 +615,9 @@ final class AetherPlayer {
                     self.health.stalled(position: self.engine.clock.currentTime,
                                         softwareRoute: self.engine.videoRoute == .software)
                     if let stall = self.health.stallRecord.last {
-                        EngineLogBook.note("[player] stall: \(stall.verdict) (\(stall.figures))")
+                        let time = DateFormatter.localizedString(from: stall.at, dateStyle: .none, timeStyle: .medium)
+                        let name = self.title ?? self.current.flatMap { URL(string: $0.url)?.lastPathComponent } ?? "?"
+                        EngineLogBook.noteStall("\(time), \(name): \(stall.verdict) (\(stall.figures))")
                     }
                 }
             }
@@ -780,6 +789,7 @@ final class AetherPlayer {
         case .paused:
             listener?.playerState(["paused": true])
         case .ended:
+            keepLastVideo(ending: "played to the end")
             ended = true
             listener?.playerEnded(reason: "eof", error: nil, cause: nil, status: nil)
             if let next = queued {
@@ -1089,11 +1099,34 @@ final class AetherPlayer {
         return ["type": "player-stats", "stats": stats, "cpuMs": Self.cpuMs, "atMs": Date().timeIntervalSince1970 * 1000]
     }
 
+    /// The title the page shows for the video, from its Now Playing item, to name it in the last video's report.
+    var title: String?
+
+    /// The report of the last video, as it stood when it stopped, ended or failed, until the app quits.
+    private(set) var lastVideo: [String]?
+
+    private func keepLastVideo(ending: String) {
+        guard let request = current else { return }
+        let file = URL(string: request.url).map { $0.lastPathComponent.removingPercentEncoding ?? $0.lastPathComponent }
+        let name = title ?? file ?? "?"
+        let time = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        let position = engine.clock.currentTime
+        let at = position > 0 ? String(format: " at %d:%02d:%02d", Int(position) / 3600, Int(position) / 60 % 60, Int(position) % 60) : ""
+        lastVideo = ["Last video: \(name), \(ending)\(at), \(time)"] + videoReport
+    }
+
     /// What the app menu and the diagnostics say about the video and its sound.
     var report: [String] {
         guard current != nil, !ended else {
-            return ["Player: AetherEngine \(Self.version), nothing playing", "Audio output: \(AudioOutput.routeSummary)"]
+            var lines = ["Player: AetherEngine \(Self.version), nothing playing", "Audio output: \(AudioOutput.routeSummary)"]
+            if let lastVideo { lines += [""] + lastVideo }
+            return lines
         }
+        return videoReport
+    }
+
+    /// The video's own lines, while it's loaded.
+    private var videoReport: [String] {
         var lines = [
             "Player: AetherEngine \(Self.version), \(Self.routeName(engine.videoRoute))",
             "Video: \(engine.sourceVideoCodecName ?? "?") \(engine.sourceVideoWidth)×\(engine.sourceVideoHeight)"

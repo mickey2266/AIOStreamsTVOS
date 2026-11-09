@@ -278,6 +278,25 @@ enum EngineLogBook {
         keep(line)
     }
 
+    /// Stalls across videos, apart from the audio and loading lines so those can't push them out.
+    private static var stalls: [String] = []
+    private static let keptStalls = 10
+
+    /// A stall's line, with the video it was in, kept until the app quits.
+    static func noteStall(_ line: String) {
+        NSLog("[player] stall: %@", line)
+        lock.lock()
+        stalls.append(String(line.prefix(600)))
+        if stalls.count > keptStalls { stalls.removeFirst(stalls.count - keptStalls) }
+        lock.unlock()
+    }
+
+    static var recentStalls: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stalls
+    }
+
     private static func keep(_ line: String) {
         lock.lock()
         audio.append(String(line.prefix(400)))
