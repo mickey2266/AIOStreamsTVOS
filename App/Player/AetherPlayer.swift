@@ -935,7 +935,13 @@ final class AetherPlayer {
             "visualImpaired": track.isVisualImpaired,
             "external": track.isExternal,
         ]
-        var title = track.name.trimmingCharacters(in: .whitespaces)
+        // An added file's title as the page named it: the page finds the file's text and its retimed copy by it.
+        var title = track.isExternal ? track.name : track.name.trimmingCharacters(in: .whitespaces)
+        // The page tells commentary from the title alone, so a file's commentary flag says so there, or the
+        // page took the track for the main one and could pick it by default.
+        if track.isCommentary, !title.localizedCaseInsensitiveContains("commentary") {
+            title = title.isEmpty ? "Commentary" : "\(title) · Commentary"
+        }
         if type == "audio" {
             // So the track list says which one carries Atmos, as the file's own names often don't.
             let profile = track.profile ?? ""
@@ -948,11 +954,35 @@ final class AetherPlayer {
             }
         }
         if !title.isEmpty { entry["title"] = title }
-        if let language = track.language, !language.isEmpty { entry["language"] = language }
-        if !track.codec.isEmpty { entry["codec"] = track.codec }
+        // No language rather than ISO 639's "none" codes, as the Android app leaves them out: the page takes two
+        // "und" tracks for the same language, and one without a language for no language.
+        if let language = track.language, !language.isEmpty,
+           !Self.noLanguages.contains(language.lowercased()) { entry["language"] = language }
+        if !track.codec.isEmpty { entry["codec"] = Self.pageCodec(track.codec) }
         if let url = addedSubtitles[track.id] { entry["url"] = url }
         return entry
     }
+
+    /**
+     * A codec as the page names it: FFmpeg's codec descriptor names, as the desktop and Android apps report
+     * them. The engine's `TrackInfo.codec` is libavcodec's decoder name, the same for text subtitles but not
+     * for picture ones, so the page took a PGS track (`pgssub`) for no subtitle it could match an added one
+     * against, and its automatic subtitle sync never started on a Blu-ray remux.
+     */
+    static func pageCodec(_ codec: String) -> String {
+        switch codec.lowercased() {
+        case "pgssub": return "hdmv_pgs_subtitle"
+        case "dvdsub": return "dvd_subtitle"
+        case "dvbsub": return "dvb_subtitle"
+        // Audio the same way, as the Android app names them: DTS of every kind is "dts" there.
+        case "dca": return "dts"
+        case "mp3float": return "mp3"
+        default: return codec
+        }
+    }
+
+    /// ISO 639 codes for no language: undetermined, no linguistic content, uncoded, multiple.
+    private static let noLanguages: Set<String> = ["und", "zxx", "mis", "mul"]
 
     private func reportChapters() {
         guard current != nil else { return }
@@ -1252,7 +1282,8 @@ final class AetherPlayer {
         case "eac3": return track.isAtmos ? "audio/eac3-joc" : "audio/eac3"
         case "ac3": return "audio/ac3"
         case "truehd", "mlp": return "audio/true-hd"
-        case "dts":
+        // The engine names DTS by libavcodec's decoder, "dca" ("dca 2 ch, DTS-HD MA" in the app menu).
+        case "dts", "dca":
             if track.isDTSX || profile.contains("DTS:X") { return "audio/vnd.dts.uhd;profile=p2" }
             return profile.contains("HD") ? "audio/vnd.dts.hd" : "audio/vnd.dts"
         case "aac": return "audio/mp4a-latm"

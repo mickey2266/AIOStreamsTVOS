@@ -219,9 +219,12 @@ enum PlayerProtocol {
 
     private static func languages(_ value: Any?) throws -> [String] {
         guard let list = value as? [Any] else { return [] }
-        return try list.map { item in
+        // A preference the player only weighs: one it can't read is left out, rather than the whole load
+        // refused over a tag saved elsewhere in another form.
+        return list.compactMap { item in
             guard let code = item as? String, code.range(of: languagePattern, options: .regularExpression) != nil else {
-                throw ProtocolError("\(item) is not a language")
+                NSLog("[player] left out a language preference it can't read: %@", String(describing: item))
+                return nil
             }
             return code
         }
