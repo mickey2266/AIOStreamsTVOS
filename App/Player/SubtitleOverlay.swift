@@ -159,10 +159,14 @@ final class SubtitleOverlay: UIView {
         guard !active.isEmpty, rect.width > 0, rect.height > 0 else { return }
 
         var stacks: [Int: CGFloat] = [:]
+        placeImages(active.compactMap { cue -> SubtitleImage? in
+            if case .image(let image) = cue.body { return image }
+            return nil
+        }, in: rect)
         for cue in active {
             switch cue.body {
-            case .image(let image):
-                place(image, in: rect)
+            case .image:
+                continue
             case .text(let raw):
                 // An ASS track drawn in the page's style: its event lines, as plain text.
                 let text = rawASS ? Self.plainText(fromASSEvents: raw) : raw
@@ -275,27 +279,60 @@ final class SubtitleOverlay: UIView {
     // MARK: Pictures
 
     /**
+     * The pictures showing now (PGS, DVB, DVD). Each is placed where the disc
+     * put it (`frame`). Those in the lower half then move together, keeping
+     * their spacing, so the lowest one's bottom edge sits where text
+     * subtitles' does: the page's Height and lift above the controls, less
+     * the margin. Discs often put them well above the bottom, a scope film's
+     * especially. Ones in the upper half, such as forced ones at the top,
+     * stay where the disc put them.
+     */
+    private func placeImages(_ images: [SubtitleImage], in rect: CGRect) {
+        guard !images.isEmpty else { return }
+        var placed = images.map { (image: $0, frame: frame(for: $0, in: rect)) }
+        let lower = placed.indices.filter { placed[$0].frame.canvasLower }
+        if let lowest = lower.map({ placed[$0].frame.rect.maxY }).max() {
+            let shift = textBottom(in: rect) - lowest
+            for index in lower {
+                placed[index].frame.rect.origin.y += shift
+            }
+        }
+        for (image, frame) in placed {
+            let view = UIImageView(image: UIImage(cgImage: image.cgImage))
+            view.contentMode = .scaleToFill
+            view.frame = frame.rect
+            addSubview(view)
+        }
+    }
+
+    /**
      * A picture's position is a fraction of the source's canvas, which is laid
      * over the picture width-aligned and centred, so a cue lands where the disc
      * put it, the black bars included. Without a canvas, it's the picture.
+     * `canvasLower`: it sits in the canvas's lower half.
      */
-    private func place(_ image: SubtitleImage, in rect: CGRect) {
+    private func frame(for image: SubtitleImage, in rect: CGRect) -> (rect: CGRect, canvasLower: Bool) {
         var canvas = rect
         if image.canvasSize.width > 0, image.canvasSize.height > 0 {
             let scale = rect.width / image.canvasSize.width
             let height = image.canvasSize.height * scale
             canvas = CGRect(x: rect.minX, y: rect.midY - height / 2, width: rect.width, height: height)
         }
-        let view = UIImageView(image: UIImage(cgImage: image.cgImage))
-        view.contentMode = .scaleToFill
         let placed = CGRect(
             x: canvas.minX + image.position.minX * canvas.width,
             y: canvas.minY + image.position.minY * canvas.height,
             width: image.position.width * canvas.width,
             height: image.position.height * canvas.height
         )
-        view.frame = Self.scaled(placed, by: Self.pictureScale * CGFloat(look?.scale ?? 1), in: canvas)
-        addSubview(view)
+        let scaled = Self.scaled(placed, by: Self.pictureScale * CGFloat(look?.scale ?? 1), in: canvas)
+        return (scaled, placed.midY >= canvas.midY)
+    }
+
+    /// Where the bottom line of text subtitles sits (`placeText`), for pictures to line up with.
+    private func textBottom(in picture: CGRect) -> CGFloat {
+        let rect = cropped ? picture.intersection(bounds) : picture
+        let position = CGFloat(look?.position ?? 100) / 100
+        return min(rect.maxY, picture.minY + picture.height * position) - Self.marginUnits * unit
     }
 
     /// Pictures at the page's Normal size: 20% under the disc's own, which reads large on a TV.
@@ -495,8 +532,7 @@ final class SubtitleOverlay: UIView {
             case 1:
                 origin.y = rect.midY - boxSize.height / 2
             default:
-                let position = CGFloat(look?.position ?? 100) / 100
-                let bottom = stacks[alignment] ?? min(rect.maxY, picture.minY + picture.height * position) - margin
+                let bottom = stacks[alignment] ?? textBottom(in: picture)
                 origin.y = bottom - boxSize.height
                 stacks[alignment] = origin.y
             }
