@@ -1,8 +1,14 @@
 #import "AIOWebView.h"
 
 #import <dlfcn.h>
+#import <errno.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <string.h>
+#import <sys/resource.h>
+
+/** In libSystem, but its header (libproc.h) isn't in the tvOS SDK. Weak, so a missing one is NULL. */
+extern int proc_pid_rusage(int pid, int flavor, rusage_info_t *buffer) __attribute__((weak_import));
 
 /*
  * Follows the WKWebView wrapper of the working aiostreams-tvos project: WebKit
@@ -442,35 +448,110 @@ static NSString *AIOMimeType(NSString *extension) {
     if (url) AIOSendObject(self.webView, @"loadRequest:", [NSURLRequest requestWithURL:url]);
 }
 
-- (NSInteger)webProcessMB {
-    Class pool = NSClassFromString(@"WKProcessPool");
-    id infos = AIOSend0(pool, @"_webContentProcessInfo") ?: AIOSend0(pool, @"_webContentProcessInfoForTesting");
-    if (![infos isKindOfClass:NSArray.class] || [(NSArray *)infos count] == 0) return -1;
-    pid_t page = 0;
-    SEL pageSel = NSSelectorFromString(@"_webProcessIdentifier");
-    if ([self.webView respondsToSelector:pageSel]) page = ((pid_t (*)(id, SEL))objc_msgSend)(self.webView, pageSel);
-    SEL footprintSel = NSSelectorFromString(@"physicalFootprint");
-    SEL pidSel = NSSelectorFromString(@"pid");
-    size_t largest = 0;
-    BOOL any = NO;
-    for (id info in (NSArray *)infos) {
-        if (![info respondsToSelector:footprintSel]) continue;
-        size_t bytes = ((size_t (*)(id, SEL))objc_msgSend)(info, footprintSel);
-        pid_t pid = [info respondsToSelector:pidSel] ? ((pid_t (*)(id, SEL))objc_msgSend)(info, pidSel) : 0;
-        if (page > 0 && pid == page) return (NSInteger)(bytes >> 20);
-        // Without the page's own, the largest: a spare process WebKit keeps warm is small.
-        if (bytes > largest) largest = bytes;
-        any = YES;
+/** A pid WebKit gives for one of its processes, or 0 where it doesn't. */
+static pid_t AIOPid(id target, NSString *selectorName) {
+    SEL sel = NSSelectorFromString(selectorName);
+    if (target == nil || ![target respondsToSelector:sel]) return 0;
+    return ((pid_t (*)(id, SEL))objc_msgSend)(target, sel);
+}
+
+/**
+ * Another process's footprint, as tvOS counts it against that process's
+ * limit, in bytes; 0 with `why` set where the system won't say (the app's
+ * sandbox may refuse another process).
+ */
+static uint64_t AIOFootprintOfPid(pid_t pid, NSString **why) {
+    if (pid <= 0) {
+        *why = @"WebKit gave no pid";
+        return 0;
     }
-    return any ? (NSInteger)(largest >> 20) : -1;
+    if (proc_pid_rusage == NULL) {
+        *why = @"no proc_pid_rusage";
+        return 0;
+    }
+    struct rusage_info_v0 usage;
+    memset(&usage, 0, sizeof(usage));
+    if (proc_pid_rusage(pid, RUSAGE_INFO_V0, (rusage_info_t *)&usage) != 0) {
+        *why = [NSString stringWithFormat:@"proc_pid_rusage(%d) failed: %s", pid, strerror(errno)];
+        return 0;
+    }
+    if (usage.ri_phys_footprint == 0) *why = [NSString stringWithFormat:@"proc_pid_rusage(%d) gave 0", pid];
+    return usage.ri_phys_footprint;
+}
+
+/** WebKit's process list, asked of the class and then of the view's own pool. */
+- (nullable NSArray *)webContentProcessInfos:(NSString **)why {
+    Class poolClass = NSClassFromString(@"WKProcessPool");
+    id pool = AIOSend0(AIOSend0(self.webView, @"configuration"), @"processPool");
+    for (id target in @[poolClass ?: NSNull.null, pool ?: NSNull.null]) {
+        if (target == NSNull.null) continue;
+        id infos = AIOSend0(target, @"_webContentProcessInfo") ?: AIOSend0(target, @"_webContentProcessInfoForTesting");
+        if ([infos isKindOfClass:NSArray.class] && [(NSArray *)infos count] > 0) return infos;
+        if (infos) {
+            *why = [infos isKindOfClass:NSArray.class] ? @"WebKit's process list is empty"
+                                                        : @"WebKit's process list isn't a list";
+            return nil;
+        }
+    }
+    *why = poolClass ? @"WKProcessPool has no _webContentProcessInfo" : @"no WKProcessPool";
+    return nil;
+}
+
+- (NSInteger)webProcessMB {
+    pid_t page = AIOPid(self.webView, @"_webProcessIdentifier");
+    NSString *listWhy = nil;
+    NSArray *infos = [self webContentProcessInfos:&listWhy];
+    if (infos) {
+        SEL footprintSel = NSSelectorFromString(@"physicalFootprint");
+        SEL pidSel = NSSelectorFromString(@"pid");
+        size_t largest = 0;
+        BOOL any = NO;
+        for (id info in infos) {
+            if (![info respondsToSelector:footprintSel]) continue;
+            size_t bytes = ((size_t (*)(id, SEL))objc_msgSend)(info, footprintSel);
+            pid_t pid = [info respondsToSelector:pidSel] ? ((pid_t (*)(id, SEL))objc_msgSend)(info, pidSel) : 0;
+            if (page > 0 && pid == page) {
+                _webProcessRoute = @"WebKit's process list";
+                return (NSInteger)(bytes >> 20);
+            }
+            // Without the page's own, the largest: a spare process WebKit keeps warm is small.
+            if (bytes > largest) largest = bytes;
+            any = YES;
+        }
+        if (any) {
+            _webProcessRoute = @"WebKit's process list, largest process";
+            return (NSInteger)(largest >> 20);
+        }
+        listWhy = @"WebKit's process list has no physicalFootprint";
+    }
+    NSString *pidWhy = nil;
+    uint64_t bytes = AIOFootprintOfPid(page, &pidWhy);
+    if (bytes > 0) {
+        _webProcessRoute = [NSString stringWithFormat:@"the system, pid %d (%@)", page, listWhy];
+        return (NSInteger)(bytes >> 20);
+    }
+    _webProcessRoute = [NSString stringWithFormat:@"no size: %@; %@", listWhy, pidWhy];
+    return -1;
 }
 
 - (NSInteger)gpuProcessMB {
     id info = AIOSend0(NSClassFromString(@"WKProcessPool"), @"_gpuProcessInfo");
     SEL footprintSel = NSSelectorFromString(@"physicalFootprint");
-    if (!info || ![info respondsToSelector:footprintSel]) return -1;
-    size_t bytes = ((size_t (*)(id, SEL))objc_msgSend)(info, footprintSel);
-    return (NSInteger)(bytes >> 20);
+    if (info && [info respondsToSelector:footprintSel]) {
+        _gpuProcessRoute = @"WebKit's process info";
+        size_t bytes = ((size_t (*)(id, SEL))objc_msgSend)(info, footprintSel);
+        return (NSInteger)(bytes >> 20);
+    }
+    NSString *infoWhy = info ? @"_gpuProcessInfo has no physicalFootprint" : @"WKProcessPool has no _gpuProcessInfo";
+    pid_t gpu = AIOPid(self.webView, @"_gpuProcessIdentifier");
+    NSString *pidWhy = nil;
+    uint64_t bytes = AIOFootprintOfPid(gpu, &pidWhy);
+    if (bytes > 0) {
+        _gpuProcessRoute = [NSString stringWithFormat:@"the system, pid %d (%@)", gpu, infoWhy];
+        return (NSInteger)(bytes >> 20);
+    }
+    _gpuProcessRoute = [NSString stringWithFormat:@"no size: %@; %@", infoWhy, pidWhy];
+    return -1;
 }
 
 - (void)responsive:(BOOL)responsive {

@@ -83,6 +83,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             guard let mb = web?.gpuProcessMB, mb >= 0 else { return nil }
             return mb
         }
+        MemoryLog.routes = { [weak web] in (web?.webProcessRoute, web?.gpuProcessRoute) }
         MemoryLog.startSampling()
         NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main

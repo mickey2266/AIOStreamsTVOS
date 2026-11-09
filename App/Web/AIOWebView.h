@@ -76,6 +76,13 @@ typedef NS_ENUM(NSInteger, AIOPageEnd) {
  * process's figure leaves out.
  */
 @property (nonatomic, readonly) NSInteger gpuProcessMB;
+/**
+ * How the last `webProcessMB` got its figure, or why it got none (which
+ * private WebKit call is missing, or what the system said), for diagnostics.
+ */
+@property (nonatomic, readonly, copy, nullable) NSString *webProcessRoute;
+/** As `webProcessRoute`, for the last `gpuProcessMB`. */
+@property (nonatomic, readonly, copy, nullable) NSString *gpuProcessRoute;
 
 @end
 

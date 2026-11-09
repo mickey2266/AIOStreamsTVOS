@@ -65,6 +65,9 @@ enum MemoryLog {
     static var webMB: () -> Int? = { nil }
     /// WebKit's graphics process in MB, which holds the page's decoded pictures and layers; nil where WebKit doesn't say.
     static var gpuMB: () -> Int? = { nil }
+    /// How the last `webMB` and `gpuMB` got their figures, or why they got none.
+    static var routes: () -> (page: String?, gpu: String?) = { (nil, nil) }
+    private static var loggedRoutes: String?
     private static var lastWebMB: Int?
     private static var peakWebMB: Int?
     private static var lastGpuMB: Int?
@@ -88,6 +91,17 @@ enum MemoryLog {
             lastGpuMB = mb
             peakGpuMB = max(peakGpuMB ?? 0, mb)
         }
+        // Logged when it changes, not every 5 s.
+        let text = routeText
+        if text != loggedRoutes {
+            loggedRoutes = text
+            NSLog("[memory] %@", text)
+        }
+    }
+
+    private static var routeText: String {
+        let (page, gpu) = routes()
+        return "Page memory from: \(page ?? "not asked yet"); WebKit graphics memory from: \(gpu ?? "not asked yet")"
     }
 
     /// This app's own memory, as tvOS counts it against the app's limit.
@@ -198,7 +212,7 @@ enum MemoryLog {
         var peak = peakWebMB.map { ", the page at most \($0) MB" } ?? ""
         if let gpu = peakGpuMB { peak += ", WebKit graphics at most \(gpu) MB" }
         if let pictures = peakPictureMB { peak += ", the page's pictures at most \(pictures) MB" }
-        var head = ["Memory: \(now); the page reloaded \(pageEnds) times since launch\(peak)"]
+        var head = ["Memory: \(now); the page reloaded \(pageEnds) times since launch\(peak)", routeText]
         if let stats = lastStats { head.append("The page now holds \(stats)") }
         return head + lines
     }
