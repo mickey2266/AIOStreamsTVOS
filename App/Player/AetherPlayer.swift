@@ -852,10 +852,19 @@ final class AetherPlayer {
      */
     func watchLines(track id: String?, onLines: @escaping ([Message]) -> Void) {
         endLineWatch()
-        guard current != nil, !ended, let id, let index = Int(id),
-              engine.subtitleTracks.contains(where: { $0.id == index && !$0.isExternal }) else { return }
+        guard let id else { return }
+        // Each step in the app menu's log, so a sync that never settles shows where it stopped.
+        guard current != nil, !ended else {
+            return EngineLogBook.note("[sync] the page asked for track \(id)'s lines with nothing playing")
+        }
+        guard let index = Int(id),
+              let track = engine.subtitleTracks.first(where: { $0.id == index && !$0.isExternal }) else {
+            return EngineLogBook.note("[sync] the page asked for track \(id)'s lines, which isn't one of the file's own")
+        }
         watchedTrack = index
+        EngineLogBook.note("[sync] reading track \(index)'s lines (\(track.codec), \(track.language ?? "no language")) for the page's subtitle sync")
         engine.selectSecondarySubtitleTrack(index: index)
+        var reported = 0
         lineWatch = engine.$secondarySubtitleCues.sink { [weak self] cues in
             guard let self, self.watchedTrack == index else { return }
             var lines: [(start: Double, end: Double)] = []
@@ -865,6 +874,13 @@ final class AetherPlayer {
                 lines.append((cue.startTime, cue.endTime))
             }
             guard !lines.isEmpty else { return }
+            // The first lines, then every hundred: the page tries a match from 30 lines over a minute.
+            if reported == 0 || self.sentLines.count / 100 > reported / 100 {
+                reported = self.sentLines.count
+                let first = lines.map(\.start).min() ?? 0
+                EngineLogBook.note(String(format: "[sync] %d lines of track %d sent to the page, the latest from %.1f s (playing at %.1f s)",
+                                          reported, index, first, self.engine.sourceTime))
+            }
             onLines(lines.sorted { $0.start < $1.start }.map { line -> Message in
                 ["startMs": line.start * 1000, "endMs": line.end * 1000]
             })
