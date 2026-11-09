@@ -363,7 +363,33 @@ final class AetherPlayer {
         if engine.duration > 0 { listener?.playerState(["durationMs": engine.duration * 1000]) }
         listener?.playerEvent("loaded")
         if holdingForLink { holdForLink() }
+        if liveOnAVPlayer { nudgeFrozenLiveStart() }
     }
+
+    /**
+     * A live channel loaded again on AVPlayer for its sound (`liveOnAVPlayer`) started frozen on its first
+     * picture, and played, with sound, after a pause and play: `play()` takes a live playhead that has
+     * fallen out of the window to the edge. The same once, when the clock hasn't moved by `frozenStartWait`
+     * and the page hasn't paused it.
+     */
+    private func nudgeFrozenLiveStart() {
+        let generation = generation
+        let startedAt = engine.clock.currentTime
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.frozenStartWait * 1_000_000_000))
+            guard let self, generation == self.generation, self.current != nil, !self.ended, !self.paused else { return }
+            let moved = self.engine.clock.currentTime - startedAt
+            guard moved < 0.5 else { return }
+            EngineLogBook.note(String(format: "[player] the live channel on AVPlayer moved %.1f s in %.0f s; to the live edge and playing",
+                                      moved, Self.frozenStartWait))
+            await self.engine.seekToLiveEdge()
+            guard generation == self.generation, self.current != nil, !self.ended, !self.paused else { return }
+            self.engine.play()
+        }
+    }
+
+    /// How long a live channel reloaded on AVPlayer gets to start moving before it's taken to the edge.
+    private static let frozenStartWait: TimeInterval = 3
 
     /**
      * How long the start is held for the soundbar to take the Dolby and widen the link, and how often
