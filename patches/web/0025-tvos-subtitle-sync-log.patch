@@ -1,0 +1,65 @@
+diff --git a/packages/web/src/lib/playback/use-player.ts b/packages/web/src/lib/playback/use-player.ts
+index f9b05b28..e831737d 100644
+--- a/packages/web/src/lib/playback/use-player.ts
++++ b/packages/web/src/lib/playback/use-player.ts
+@@ -24,6 +24,7 @@ import type { MediaStream, SourceInfo } from '../types';
+ import { useLatest } from '../use-latest';
+ import type { Chapter } from './chapters';
+ import { useLiveRecovery } from './live-recovery';
++import { appLog } from '../hosts/shell/bridge';
+ import {
+   initialState,
+   storedVolume,
+@@ -471,6 +472,31 @@ export function usePlayer(
+     [syncing, waiting, tracks, lang, index]
+   );
+ 
++  /* eslint-disable lingui/no-unlocalized-strings -- the Apple TV app's own log, untranslated (AIOStreamsTVOS) */
++  // Why an added subtitle is synced or not, into the app's report.
++  const syncNote =
++    !shown || !(shownServer || shownTrack?.external)
++      ? null
++      : !engine.watchLines
++        ? 'the player gives no line times'
++        : waiting
++          ? "waiting for the file's subtitle index"
++          : reference
++            ? `matching against track ${reference}`
++            : `no full text or PGS subtitle of the file's own to match against (${
++                tracks
++                  .filter((t) => t.type === 'subtitle' && !t.external)
++                  .map(
++                    (t) =>
++                      `${t.id} ${t.codec ?? 'no codec'} ${t.lang ?? 'no language'}${t.forced ? ' forced' : ''}${t.title ? ` "${t.title}"` : ''}`
++                  )
++                  .join(', ') || 'none'
++              })`;
++  React.useEffect(() => {
++    if (syncNote) appLog('info', `[sync] ${shown}: ${syncNote}`);
++  }, [syncNote, shown]);
++  /* eslint-enable lingui/no-unlocalized-strings */
++
+   React.useEffect(() => {
+     if (!shown || !engine.setSubtitleDelay) return;
+     const ms = savedSubtitleDelay(source.Id, delayKey(tracks, shown))?.ms ?? 0;
+@@ -512,6 +538,8 @@ export function usePlayer(
+     let stop = () => {};
+     let first = true;
+     const report = (outcome: SyncOutcome) => {
++      // eslint-disable-next-line lingui/no-unlocalized-strings -- the Apple TV app's own log (AIOStreamsTVOS)
++      appLog('info', `[sync] ${shown}: ${JSON.stringify(outcome)}`);
+       setSyncWaiting(false);
+       setSyncOutcome({ subtitle: shown, outcome });
+     };
+@@ -553,7 +581,10 @@ export function usePlayer(
+     };
+     setSyncWaiting(asked);
+     const waited = setTimeout(() => setSyncWaiting(false), ASKED_WAIT_MS);
+-    latestRead.current(shown)?.then(
++    const reading = latestRead.current(shown);
++    // eslint-disable-next-line lingui/no-unlocalized-strings -- the Apple TV app's own log (AIOStreamsTVOS)
++    if (!reading) appLog('info', `[sync] ${shown}: no text of the added subtitle to match`);
++    reading?.then(
+       (text) => {
+         if (stopped) return;
+         const cues = parseSubtitle(text);

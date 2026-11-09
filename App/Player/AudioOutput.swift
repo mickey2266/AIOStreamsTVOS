@@ -258,8 +258,11 @@ enum EngineLogBook {
     private static let audioWords = ["atmos", "eac3", "e-ac-3", "joc", "truehd", "dts", "audio", "mat ", "apac", "bridge", "spatial"]
     /// The lines that say which way a video went and why it failed: the probe, the HLS reroutes
     /// (AE#154 and AE#246 to AVPlayer, AE#363 and AE#678 to the engine's live reader) and AVPlayer giving up.
+    /// Also an added subtitle that failed: the engine's sidecar fetch and decode (AE#984's whole-body GET
+    /// since engine 7.59) says why only here, and the app's own `[subtitles]` lines say what was added.
     private static let loadWords = ["probe failed", "ae#154", "ae#246", "ae#363", "ae#678", "failedtoplaytoend",
-                                    "hls playlist body", "[player]", Self.producerSlowWords]
+                                    "hls playlist body", "[player]", "[subtitles]", "sidecar decode failed", "ae#984",
+                                    Self.producerSlowWords]
     /// The engine's AE#850 line only: "pump qos: utility produced at 0.42x real time, below 1.00x, staying
     /// userInitiated for this session". Its everyday `pump qos -> utility` and `-> userInitiated` lines are
     /// the producer relaxing once it's far ahead, a sign it keeps up, and must not count.

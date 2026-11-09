@@ -502,6 +502,8 @@ final class AetherPlayer {
             addedSubtitles[replace] = nil
         }
         let format = ["srt", "ass", "ssa", "vtt", "sup"].first { url.pathExtension.lowercased() == $0 }
+        // What was added, for the app menu's report beside the engine's `sidecar decode failed` if it fails.
+        EngineLogBook.note("[subtitles] adding \(url.isFileURL ? "a file the user added" : Self.shortened(url)) as \(format ?? "an unnamed format")")
         let track = engine.addExternalSubtitleTrack(ExternalSubtitleTrack(
             url: url,
             name: title.flatMap { $0.isEmpty ? nil : $0 },

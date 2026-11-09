@@ -499,6 +499,15 @@ final class MainViewController: UIViewController, RemoteReceiver {
             pip?.start()
         case "app-info":
             sendToPage(AppAnswers.appInfo())
+        case "log":
+            // The page's `appLog`, into the app's log. Its subtitle sync lines (`[sync]`, patches/web/0025) also go
+            // into the app menu's report, beside the app's own; the rest, such as live recovery's, would crowd it.
+            let line = String((message.text("message") ?? "").prefix(400))
+            if line.hasPrefix("[sync]") {
+                EngineLogBook.note("[page] \(line)")
+            } else {
+                NSLog("[page] %@ %@", message.text("level") ?? "info", line)
+            }
         case "player-engine":
             // The page asks for its engine choice; this app has only AetherEngine. Like the Android app's
             // ExoPlayer, it plays on the system's decoders and has no mpv options, so the page treats it as
