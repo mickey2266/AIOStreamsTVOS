@@ -421,6 +421,15 @@ Back behaviour and the bundled-player path. It also means:
   skips. Here it's a stop of its own above the row's posters: Up from any of them goes to it, Down
   into the row from above lands on it first, and Click opens the catalog
   (`patches/web/0018-tvos-row-titles-open-catalog.patch`).
+- In the player, Click while the controls are hidden brings them up, with Play focused, rather than
+  pausing or playing as the page does on other TVs; Play/Pause still pauses and plays
+  (`patches/web/0021-tvos-select-shows-hidden-controls.patch`). While the skip button shows, Click
+  still skips the intro or credits, and during a scrub it still plays from the picture.
+  When the controls come back, focus goes to the button or seek bar that had it when they hid, such
+  as Subtitles, rather than to Play. Only the controls' own buttons and the seek bar count: after
+  picking something in the Subtitles or Audio menu, or in what it opens, focus comes back to that
+  menu's button. Play is the start for each new video, or when what had focus is gone or disabled
+  (`patches/web/0022-tvos-controls-remember-focus.patch`).
 - With **Infuse** as the player (Settings → Playback → Player), the link names the video by its title,
   with the episode for an episode, rather than the file's name:
   `infuse://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}`

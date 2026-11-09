@@ -1,0 +1,88 @@
+diff --git a/packages/web/src/components/player/controls.tsx b/packages/web/src/components/player/controls.tsx
+index 485faaa2..47035d8c 100644
+--- a/packages/web/src/components/player/controls.tsx
++++ b/packages/web/src/components/player/controls.tsx
+@@ -340,6 +340,7 @@ export function PlayerControls({
+ 
+   usePlayerKeys({
+     player,
++    stream: item.Id,
+     root,
+     ready,
+     visible,
+diff --git a/packages/web/src/components/player/keys.ts b/packages/web/src/components/player/keys.ts
+index 9930381d..288c596b 100644
+--- a/packages/web/src/components/player/keys.ts
++++ b/packages/web/src/components/player/keys.ts
+@@ -40,6 +40,8 @@ type Outcome = boolean | void | 'quiet' | 'brief';
+ 
+ interface PlayerKeys {
+   player: PlayerController;
++  /** The video playing, whose change forgets the control focus went back to. */
++  stream?: string | null;
+   /** The controls, which Back leaves before it leaves the player. */
+   root: React.RefObject<HTMLElement | null>;
+   /** False until the first frame. */
+@@ -70,6 +72,11 @@ interface PlayerKeys {
+ /** The player's shortcuts, each of which also shows the controls. */
+ export function usePlayerKeys(keys: PlayerKeys): void {
+   const latest = useLatest(keys);
++  // The control focus goes back to when the controls come back, this video's only.
++  const lastFocused = React.useRef<HTMLElement | null>(null);
++  React.useEffect(() => {
++    lastFocused.current = null;
++  }, [keys.stream]);
+   const { subtitle } = keys.player.state;
+   const lastSubtitle = React.useRef<string | null>(null);
+   React.useEffect(() => {
+@@ -165,11 +172,37 @@ export function usePlayerKeys(keys: PlayerKeys): void {
+       if (!k().visible && k().zap?.step) return zapStep(-sign);
+       focusControls();
+     };
+-    /** The skip button while it shows, else play. */
++    /*
++     * The button or seek bar that last had focus in the controls, which
++     * hiding them blurs: on a TV, bringing them back focuses it again, as long
++     * as it is still there to press (AIOStreamsTVOS). Only the controls' own
++     * buttons and the seek bar count, so a button that opens a menu, such as
++     * Subtitles or Audio, stays the one remembered whatever is picked in its
++     * menu, or opened from it. Forgotten for the next video (`lastFocused`,
++     * `stream`).
++     */
++    const CONTROL =
++      '[data-ui=player-button], [data-ui=player-middle-button], [data-ui=seek-bar]';
++    const onFocusIn = (e: FocusEvent) => {
++      const el = e.target;
++      if (!(el instanceof HTMLElement) || !el.matches(CONTROL)) return;
++      if (k().root.current?.contains(el)) lastFocused.current = el;
++    };
++    document.addEventListener('focusin', onFocusIn, true);
++    const remembered = () => {
++      const el = lastFocused.current;
++      if (!currentHost().tv || !el?.isConnected) return null;
++      if (!k().root.current?.contains(el)) return null;
++      if (el.matches(':disabled, [aria-disabled=true]')) return null;
++      return el.getClientRects().length ? el : null;
++    };
++
++    /** The skip button while it shows, else the control focused last, else play. */
+     const focusControls = () => {
+       const root = k().root.current;
+       const target =
+         root?.querySelector<HTMLElement>('[data-ui=skip-segment] button') ??
++        remembered() ??
+         [
+           ...(root?.querySelectorAll<HTMLElement>('[data-name=play]') ?? []),
+         ].find((el) => el.getClientRects().length);
+@@ -314,6 +347,9 @@ export function usePlayerKeys(keys: PlayerKeys): void {
+         else if (!currentHost().back?.()) k().onBack();
+       })
+     );
+-    return () => stops.forEach((stop) => stop());
+-  }, [latest]);
++    return () => {
++      stops.forEach((stop) => stop());
++      document.removeEventListener('focusin', onFocusIn, true);
++    };
++  }, [latest, lastFocused]);
+ }
