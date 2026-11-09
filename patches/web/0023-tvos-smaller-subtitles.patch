@@ -25,11 +25,12 @@ index f5e4ba01..b4064ad4 100644
    small: 0.8,
    normal: 1,
    large: 1.25,
-@@ -19,6 +21,7 @@ const SCALE: Record<SubtitleSize, number> = {
+@@ -19,6 +21,8 @@ const SCALE: Record<SubtitleSize, number> = {
  
  export const subtitleSizeLabel = (size: SubtitleSize) =>
    ({
-+    smaller: t`Smaller`,
++    // eslint-disable-next-line lingui/no-unlocalized-strings -- the Apple TV app's own build, untranslated
++    smaller: 'Smaller',
      small: t`Small`,
      normal: t`Normal`,
      large: t`Large`,

@@ -61,7 +61,7 @@ struct SubtitleLook {
     let outlineColor: String
     let outlineSize: Double
     let shadowSize: Double
-    /// A font family, or nil for the system's.
+    /// One of the page's font names (`SubtitleFonts`), or nil for the system's.
     let font: String?
     let backColor: String
     let box: Bool
@@ -186,12 +186,10 @@ enum PlayerProtocol {
         return settings
     }
 
-    /// The page's font names, which are Android's. All of them get the system font.
+    /// The page's font names, which are Android's. The overlay maps each to a family tvOS has (`SubtitleFonts`).
     private static func font(_ name: String) throws -> String? {
-        switch name {
-        case "sans-serif", "serif", "monospace", "serif-monospace", "casual", "cursive": return nil
-        default: throw ProtocolError("\(name) is not a font")
-        }
+        guard SubtitleFonts.names.contains(name) else { throw ProtocolError("\(name) is not a font") }
+        return name
     }
 
     private static let colourPattern = "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"

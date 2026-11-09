@@ -1,3 +1,4 @@
+import AetherHost
 import CoreGraphics
 import Foundation
 import SwiftLibass
@@ -45,13 +46,15 @@ final class AssRenderer: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "io.github.aiostreams.ass", qos: .userInteractive)
 
-    // Queue only.
-    private let library: OpaquePointer?
-    private let renderer: OpaquePointer?
+    // Queue only, after `init`.
+    private var library: OpaquePointer?
+    private var renderer: OpaquePointer?
     private var track: UnsafeMutablePointer<ASS_Track>?
     private var applied: Layout?
 
     // Main thread only.
+    /// The file's fonts libass has now, by name and size, so the next episode's same set isn't added again.
+    private var fontKeys: [String] = []
     private var generation = 0
     /// Events given to the track, so a re-published cue list adds only what's new.
     private var seen = Set<String>()
@@ -66,15 +69,38 @@ final class AssRenderer: @unchecked Sendable {
     }
 
     init() {
+        start(fonts: [])
+    }
+
+    deinit {
+        stop()
+    }
+
+    /// A new library and renderer with the file's fonts. Queue only, or `init`.
+    private func start(fonts: [FontAttachment]) {
         library = ass_library_init()
         renderer = library.flatMap { ass_renderer_init($0) }
+        applied = nil
         guard let library, let renderer else {
             NSLog("[subtitles] libass did not start")
             return
         }
         // Fonts a script carries in its own [Fonts] section.
         ass_set_extract_fonts(library, 1)
-        // tvOS's own fonts through CoreText, with Helvetica Neue in place of a family it hasn't got,
+        // The fonts the file carries as attachments, as mpv gives libass a Matroska's: the signs and
+        // typesetting of anime releases name families only these have. libass copies the bytes.
+        for font in fonts {
+            var bytes = [CChar](repeating: 0, count: font.data.count)
+            bytes.withUnsafeMutableBytes { target in _ = font.data.copyBytes(to: target) }
+            font.filename.withCString { name in
+                let name = strdup(name)
+                defer { free(name) }
+                bytes.withUnsafeMutableBufferPointer { buffer in
+                    ass_add_font(library, name, buffer.baseAddress, Int32(buffer.count))
+                }
+            }
+        }
+        // tvOS's own fonts through CoreText, with Helvetica Neue in place of a family neither has,
         // and CoreText's fallback for characters the chosen font lacks.
         ass_set_fonts(renderer, nil, "Helvetica Neue", Int32(ASS_FONTPROVIDER_CORETEXT.rawValue), nil, 0)
         // The font scale only sizes what looks like dialogue, so signs and other typesetting keep
@@ -82,10 +108,37 @@ final class AssRenderer: @unchecked Sendable {
         ass_set_selective_style_override_enabled(renderer, Int32(ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE.rawValue))
     }
 
-    deinit {
+    /// Frees the track, renderer and library, in that order: libass lets go of fonts only with all three gone.
+    private func stop() {
         if let track { ass_free_track(track) }
         if let renderer { ass_renderer_done(renderer) }
         if let library { ass_library_done(library) }
+        track = nil
+        renderer = nil
+        library = nil
+    }
+
+    // MARK: The fonts
+
+    /**
+     * The playing file's attached fonts. A different set from the last
+     * file's starts libass over with them, dropping the track: returns true
+     * then, and the caller loads the track again. The same set keeps all.
+     */
+    @discardableResult
+    func setFonts(_ fonts: [FontAttachment]) -> Bool {
+        let keys = fonts.map { "\($0.filename)|\($0.data.count)" }
+        guard keys != fontKeys else { return false }
+        fontKeys = keys
+        generation += 1
+        seen.removeAll()
+        let total = fonts.reduce(0) { $0 + $1.data.count }
+        NSLog("[subtitles] \(fonts.count) attached fonts for libass (\(total / 1024) KB)")
+        queue.async { [self] in
+            stop()
+            start(fonts: fonts)
+        }
+        return true
     }
 
     // MARK: The track

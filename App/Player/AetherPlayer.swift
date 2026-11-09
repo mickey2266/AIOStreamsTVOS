@@ -317,6 +317,9 @@ final class AetherPlayer {
         if paused { engine.pause() }
         if speed != 1 { engine.setRate(Float(speed)) }
         applyVolume()
+        // The fonts the file carries for its ASS subtitles, before a track is picked; libass needs them for the
+        // signs and typesetting. Read once the file has opened, so a track picked during the load starts over.
+        subtitles.setFonts(engine.fontAttachments)
         pickSubtitle(request)
         reportTracks()
         reportChapters()

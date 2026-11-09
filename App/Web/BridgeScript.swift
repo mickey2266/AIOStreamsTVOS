@@ -547,6 +547,21 @@ enum BridgeScript {
     searchOpened = el;
     openKeyboard(el);
   };
+  /*
+   * The page's router (TanStack's hash history) moves between pages with history.pushState and
+   * replaceState, which fire no hashchange, so opening Search from the navigation never reached
+   * this. Both are wrapped here, at document start, before the router wraps them in turn; Back
+   * and Forward come as popstate. Checked after the call, once the address has changed.
+   */
+  for (const name of ['pushState', 'replaceState']) {
+    const original = history[name];
+    history[name] = function (...args) {
+      const result = original.apply(this, args);
+      setTimeout(() => openSearchKeyboard());
+      return result;
+    };
+  }
+  window.addEventListener('popstate', () => openSearchKeyboard());
   window.addEventListener('hashchange', () => openSearchKeyboard());
   window.addEventListener('load', () => openSearchKeyboard());
 

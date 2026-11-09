@@ -89,6 +89,14 @@ final class SubtitleOverlay: UIView {
         redraw()
     }
 
+    /// The playing file's attached fonts, for libass. A new set starts the track over with them.
+    func setFonts(_ fonts: [FontAttachment]) {
+        guard ass.setFonts(fonts), assLoaded else { return }
+        assLoaded = false
+        updateASS()
+        redraw()
+    }
+
     func reset() {
         cues = []
         time = 0
@@ -189,8 +197,8 @@ final class SubtitleOverlay: UIView {
             left: pixels(picture.minX - bounds.minX),
             right: pixels(bounds.maxX - picture.maxX),
             useMargins: cropped,
-            // 20% under the file's sizes, which read large on a TV.
-            fontScale: (look?.scale ?? 1) * 0.8
+            // 20% under the file's sizes, which read large on a TV, and the text's own 10% on top.
+            fontScale: (look?.scale ?? 1) * 0.8 * Double(Self.textScale)
         )
         let milliseconds = Int64(((time - delay) * 1000).rounded())
         ass.render(at: milliseconds, layout: layout) { [weak self] output in
@@ -333,9 +341,11 @@ final class SubtitleOverlay: UIView {
     }
 
     /// Sizes at sub-scale 1, in units of a 720-line screen: 36 units is 5% of the screen's height,
-    /// the size the page's own player draws its subtitles at (`scale * 5vh`), so a setting means the
-    /// same size in both; the margin is mpv's.
-    private static let fontUnits: CGFloat = 36
+    /// the size the page's own player draws its subtitles at (`scale * 5vh`); the text here is
+    /// `textScale` of that, as it reads large on a TV. The margin is mpv's.
+    private static let fontUnits: CGFloat = 36 * textScale
+    /// Text subtitles, plain and ASS alike, against the page's sizes: 10% under them.
+    private static let textScale: CGFloat = 0.9
     private static let marginUnits: CGFloat = 22
 
     /// One unit of a 720-line screen. Sized to the screen, not the picture, as mpv's `sub-scale-by-window`
@@ -380,9 +390,16 @@ final class SubtitleOverlay: UIView {
             // heavier and larger-looking than the rest at the same size.
             if (run.bold && !forced) || look?.bold == true { traits.insert(.traitBold) }
             if run.italic && !forced { traits.insert(.traitItalic) }
-            var font = UIFont.systemFont(ofSize: size, weight: traits.contains(.traitBold) ? .bold : .medium)
-            if traits.contains(.traitItalic), let italic = font.fontDescriptor.withSymbolicTraits(traits) {
-                font = UIFont(descriptor: italic, size: size)
+            var font: UIFont
+            if let chosen = SubtitleFonts.font(
+                look?.font, size: size, bold: traits.contains(.traitBold), italic: traits.contains(.traitItalic)
+            ) {
+                font = chosen
+            } else {
+                font = UIFont.systemFont(ofSize: size, weight: traits.contains(.traitBold) ? .bold : .medium)
+                if traits.contains(.traitItalic), let italic = font.fontDescriptor.withSymbolicTraits(traits) {
+                    font = UIFont(descriptor: italic, size: size)
+                }
             }
             // The cue's own colour, unless the page's style overrides the file's.
             var color = fill
