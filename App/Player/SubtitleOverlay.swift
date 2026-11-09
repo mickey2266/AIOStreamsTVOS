@@ -198,7 +198,10 @@ final class SubtitleOverlay: UIView {
             right: pixels(bounds.maxX - picture.maxX),
             useMargins: cropped,
             // 20% under the file's sizes, which read large on a TV, and the text's own 10% on top.
-            fontScale: (look?.scale ?? 1) * 0.8 * Double(Self.textScale)
+            fontScale: (look?.scale ?? 1) * 0.8 * Double(Self.textScale),
+            // The page's Height, and its lift above the controls while they show, as for text. libass takes
+            // 0 to 100 up from the bottom; below the usual place stays at it, as libass moves only up.
+            linePosition: min(100, max(0, 100 - (look?.position ?? 100)))
         )
         let milliseconds = Int64(((time - delay) * 1000).rounded())
         ass.render(at: milliseconds, layout: layout) { [weak self] output in

@@ -30,6 +30,9 @@ final class AssRenderer: @unchecked Sendable {
         var useMargins: Bool
         /// The page's subtitle scale, as mpv's `sub-scale` applies it to ASS, on dialogue only.
         var fontScale: Double
+        /// The page's subtitle height, as mpv gives libass its `sub-pos` (`100 - sub-pos`): percent of the
+        /// picture that dialogue without a position of its own moves up from the bottom, 0 leaving it.
+        var linePosition: Double
 
         var pictureWidth: Int32 { frameWidth - left - right }
         var pictureHeight: Int32 { frameHeight - top - bottom }
@@ -235,6 +238,7 @@ final class AssRenderer: @unchecked Sendable {
             ass_set_margins(renderer, layout.top, layout.bottom, layout.left, layout.right)
             ass_set_use_margins(renderer, layout.useMargins ? 1 : 0)
             ass_set_font_scale(renderer, layout.fontScale)
+            ass_set_line_position(renderer, layout.linePosition)
         }
         var changed: Int32 = 0
         let images = ass_render_frame(renderer, track, milliseconds, &changed)

@@ -1,0 +1,40 @@
+diff --git a/packages/web/src/pages/settings/subtitles.tsx b/packages/web/src/pages/settings/subtitles.tsx
+index af658b0c..5c4ea1e5 100644
+--- a/packages/web/src/pages/settings/subtitles.tsx
++++ b/packages/web/src/pages/settings/subtitles.tsx
+@@ -26,6 +26,7 @@ import {
+ } from '../../lib/settings';
+ import { ColorInput } from '@aiostreams/ui/color-input';
+ import { currentHost } from '../../lib/hosts';
++import { appleTv } from '../../lib/hosts/shell/bridge';
+ import { SettingsCard } from '../../components/settings-card';
+ import { languageOptions, LanguageList, followsYou, onAccount } from './common';
+ 
+@@ -67,6 +68,14 @@ const fontOptions = (): { value: SubtitleFont; label: string }[] => [
+   { value: 'cursive', label: t`Cursive` },
+ ];
+ 
++/**
++ * What the switch does in the Apple TV app (AIOStreamsTVOS), which honours it, and sizes Blu-ray and
++ * DVD subtitles with Size. In English only: the app's own build, with no catalog entry for it.
++ */
++const TVOS_STYLED_HELP =
++  // eslint-disable-next-line lingui/no-unlocalized-strings -- the Apple TV app's own build, untranslated
++  'Styled subtitles, common in anime, keep their own fonts, colours and placement unless this is on, which shows them as plain text in your style. Blu-ray and DVD subtitles keep their look, at the size chosen above.';
++
+ const subtitleTypeOptions = (): { value: SubtitleType; label: string }[] => [
+   { value: 'normal', label: t`Full` },
+   { value: 'sdh', label: t`SDH, with sounds described` },
+@@ -248,7 +257,11 @@ export function SubtitlesSection() {
+         <Switch
+           side="right"
+           label={t`Apply to styled subtitles too`}
+-          help={t`Styled subtitles, common in anime, keep their own fonts and colours unless this is on. Blu-ray and DVD subtitles always keep their look and size. Only in the desktop app.`}
++          help={
++            appleTv()
++              ? TVOS_STYLED_HELP
++              : t`Styled subtitles, common in anime, keep their own fonts and colours unless this is on. Blu-ray and DVD subtitles always keep their look and size. Only in the desktop app.`
++          }
+           value={overrideStyled}
+           onValueChange={setOverrideStyled}
+         />
