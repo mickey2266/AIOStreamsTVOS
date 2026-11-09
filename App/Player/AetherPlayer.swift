@@ -221,11 +221,9 @@ final class AetherPlayer {
         // and segment request: a `.m3u8` at once, any other address once it answers with a playlist (AE#363).
         // Without this it plays the playlist in AVPlayer as a finished one.
         options.isLive = live
-        // The open reads the stream until each of its tracks is known, for up to 60 s of it by the engine's
-        // default. A live stream comes at the speed it plays, so a channel with a track that never sends
-        // (an unused audio language, empty teletext) held its first picture for all of it: raw MPEG-TS most,
-        // where the open reads the broadcast itself. FFmpeg's own 5 s, which mpv plays channels with.
-        if live { options.maxAnalyzeDuration = Self.liveAnalyzeMicroseconds }
+        // The open's probe budget stays the engine's (60 s of the stream). A 5 s cap on live opens left an
+        // IPTV channel's AC-3 tracks unidentified ("Could not find codec parameters ... unspecified sample
+        // rate"): the session played the picture with no sound, which other players had (Nov 2026).
         // Held for the link, it plays from `releaseHold` instead.
         options.autoplay = !paused && !holdingForLink
         options.preferredAudioLanguages = request.audioLanguages
@@ -303,9 +301,6 @@ final class AetherPlayer {
         options.prepareNativeSubtitles = true
         return options
     }
-
-    /// How much of a live stream the open may read to learn its tracks, in microseconds (`options`).
-    private static let liveAnalyzeMicroseconds: Int64 = 5 * 1_000_000
 
     /// The engine's largest forward window (about 3 hours of 4 s segments): with a Cache size set, the
     /// bytes bound the buffer, not this.
