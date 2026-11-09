@@ -589,37 +589,74 @@ final class AetherPlayer {
      * A subtitle of the file's own picked while it plays sometimes showed nothing. The engine decodes
      * a picked track from the packets it has kept of every subtitle stream, around the playhead; mpv,
      * in the desktop app, reads the stream again from the playhead on every pick instead (its
-     * "refresh" seek, the buffering you see there). Here that read happens only when the pick has
-     * decoded no line `pickedSubtitleWait` later: a seek to where the video is. Both outcomes go in the
-     * app menu's log, so a track that still shows nothing says whether it had lines to draw.
+     * "refresh" seek, the buffering you see there). Here that read happens only when the pick is
+     * missing a line it should show: a seek to where the video is.
+     *
+     * With the file's subtitle index (`subtitleIndex()`, read once per file for the subtitle sync) the
+     * app knows when the track's lines are, so `pickedSubtitleLook` after the pick it asks whether one
+     * is on screen or about to be, and reads again at once if the engine has none there; a pick between
+     * lines is left alone, as nothing is due. Without an index, only a pick that has decoded no line at
+     * all `pickedSubtitleWait` later is read again. Each outcome goes in the app menu's log.
      */
     private func checkPickedSubtitle(_ index: Int) {
         subtitlePickCheck?.cancel()
         guard index < AetherEngine.externalSubtitleTrackIDBase, !engine.isLive,
-              engine.hasFirstFrameReadyForDisplay,
+              engine.hasFirstFrameReadyForDisplay, let request = current,
               let track = engine.subtitleTracks.first(where: { $0.id == index }) else { return }
         let generation = generation
         let name = "track \(index) (\(track.codec), \(track.language ?? "no language"))"
         subtitlePickCheck = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleWait * 1_000_000_000))
-            guard let self, !Task.isCancelled, generation == self.generation, self.current != nil, !self.ended,
-                  self.engine.activeSubtitleTrackIndex == index else { return }
-            let lines = self.engine.subtitleCues.count
-            guard lines == 0 else {
-                return EngineLogBook.note("[subtitles] \(name) picked: \(lines) lines decoded around the playhead")
+            try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleLook * 1_000_000_000))
+            guard let self, self.pickStillCurrent(index, generation) else { return }
+            // Read once per file, a second or so the first time; the sync may have read it already.
+            let all = await self.subtitleIndex()
+            let indexed = self.current?.url == request.url ? all?[index] : nil
+            guard self.pickStillCurrent(index, generation), !self.engine.isSeeking else { return }
+            let now = self.engine.sourceTime
+            let decoded = self.engine.subtitleCues
+            let showing = decoded.contains { $0.startTime <= now + Self.pickedSubtitleDue && $0.endTime > now }
+            if let indexed {
+                let due = indexed.first { $0.start / 1000 <= now + Self.pickedSubtitleDue && $0.end / 1000 > now }
+                guard let due else {
+                    return EngineLogBook.note(String(format: "[subtitles] %@ picked at %.1f s: no line due there in the file's index; %d decoded",
+                                                     name, now, decoded.count))
+                }
+                guard !showing else {
+                    return EngineLogBook.note(String(format: "[subtitles] %@ picked at %.1f s: its line from %.1f s is decoded",
+                                                     name, now, due.start / 1000))
+                }
+                EngineLogBook.note(String(format: "[subtitles] %@ picked at %.1f s: the file's line from %.1f s to %.1f s isn't decoded (%d lines are); reading the stream again",
+                                          name, now, due.start / 1000, due.end / 1000, decoded.count))
+            } else {
+                try? await Task.sleep(nanoseconds: UInt64((Self.pickedSubtitleWait - Self.pickedSubtitleLook) * 1_000_000_000))
+                guard self.pickStillCurrent(index, generation), !self.engine.isSeeking else { return }
+                let lines = self.engine.subtitleCues.count
+                guard lines == 0 else {
+                    return EngineLogBook.note("[subtitles] \(name) picked: \(lines) lines decoded around the playhead")
+                }
+                EngineLogBook.note(String(format: "[subtitles] %@ picked: no line decoded in %.0f s and no index; reading the stream again",
+                                          name, Self.pickedSubtitleWait))
             }
-            guard !self.engine.isSeeking else { return }
-            EngineLogBook.note(String(format: "[subtitles] %@ picked: no line decoded in %.0f s; reading the stream again from %.1f s",
-                                      name, Self.pickedSubtitleWait, self.engine.clock.currentTime))
             await self.engine.seek(to: self.engine.clock.currentTime)
             try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleWait * 1_000_000_000))
-            guard !Task.isCancelled, generation == self.generation, self.current != nil, !self.ended,
-                  self.engine.activeSubtitleTrackIndex == index else { return }
-            EngineLogBook.note("[subtitles] \(name) after reading again: \(self.engine.subtitleCues.count) lines decoded")
+            guard self.pickStillCurrent(index, generation) else { return }
+            let at = self.engine.sourceTime
+            let shown = self.engine.subtitleCues.contains { $0.startTime <= at && $0.endTime > at }
+            EngineLogBook.note("[subtitles] \(name) after reading again: \(self.engine.subtitleCues.count) lines decoded, "
+                + (shown ? "one on screen" : "none on screen"))
         }
     }
 
-    /// How long a picked subtitle has to decode a line before the stream is read again for it.
+    private func pickStillCurrent(_ index: Int, _ generation: Int) -> Bool {
+        !Task.isCancelled && generation == self.generation && current != nil && !ended
+            && engine.activeSubtitleTrackIndex == index
+    }
+
+    /// How long after a pick the app looks for its line, against the file's index.
+    private static let pickedSubtitleLook: TimeInterval = 0.75
+    /// A line starting this soon after the playhead counts as due now.
+    private static let pickedSubtitleDue: TimeInterval = 0.75
+    /// Without an index, how long a pick has to decode any line before the stream is read again for it.
     private static let pickedSubtitleWait: TimeInterval = 2
 
     func seek(_ positionMs: Double) {
