@@ -154,7 +154,11 @@ final class AetherPlayer {
         health = PlaybackHealth()
         subtitles.reset()
         listener?.playerEvent("start")
-        listener?.playerState(["idle": false, "buffering": true, "positionMs": request.startMs])
+        // A new file starts with no subtitle, and the page is told so. The engine let go of the last file's
+        // with `stop()` already gone, which reports nothing, and a file that picks none never changes it
+        // again: the page kept the last channel's track as the one showing, its menu ticked it with nothing
+        // on screen, and it never sent a pick it took as made. A pick for this file follows from the engine.
+        listener?.playerState(["idle": false, "buffering": true, "positionMs": request.startMs, "subtitle": NSNull()])
         // With the primer, the video loads paused and starts once the link is wide (`holdForLink`).
         holdingForLink = primes
         loading?.cancel()
