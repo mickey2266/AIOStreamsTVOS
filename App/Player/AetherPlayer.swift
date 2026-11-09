@@ -888,17 +888,31 @@ final class AetherPlayer {
         EngineLogBook.note("[sync] reading track \(index)'s lines (\(track.codec), \(track.language ?? "no language")) for the page's subtitle sync")
         engine.selectSecondarySubtitleTrack(index: index)
         var reported = 0
+        /*
+         * A picture subtitle (PGS, DVD, DVB) has no end of its own: the next packet on its stream closes
+         * it, so the engine publishes each with an open placeholder end and trims it once that packet
+         * comes. Sent as start and end, each picture reached the page twice, once with the placeholder's
+         * length, and the page's match on those found nothing it was sure of, so a PGS reference never
+         * synced. A picture goes once, by its start, and the latest of each update waits for a later one,
+         * which shows its end is the authored one. A text line's end is its own from the first.
+         */
+        let pictures = Self.isPictureCodec(track.codec)
         lineWatch = engine.$secondarySubtitleCues.sink { [weak self] cues in
             guard let self, self.watchedTrack == index else { return }
+            let timed = cues.filter { $0.endTime > $0.startTime }.sorted { $0.startTime < $1.startTime }
             var lines: [(start: Double, end: Double)] = []
-            for cue in cues where cue.endTime > cue.startTime {
+            for cue in pictures ? Array(timed.dropLast()) : timed {
                 // Cues come again as the decoded window moves; each line goes once.
-                guard self.sentLines.insert("\(cue.startTime)|\(cue.endTime)").inserted else { continue }
+                let key = pictures ? "\(cue.startTime)" : "\(cue.startTime)|\(cue.endTime)"
+                guard self.sentLines.insert(key).inserted else { continue }
                 lines.append((cue.startTime, cue.endTime))
             }
             guard !lines.isEmpty else { return }
-            // The first lines, then every hundred: the page tries a match from 30 lines over a minute.
-            if reported == 0 || self.sentLines.count / 100 > reported / 100 {
+            // The first lines, then at 30 and 60, where the page tries a match (30 lines over a minute, 60 to
+            // stand alone), then every hundred.
+            let count = self.sentLines.count
+            if reported == 0 || (reported < 30 && count >= 30) || (reported < 60 && count >= 60)
+                || count / 100 > reported / 100 {
                 reported = self.sentLines.count
                 let first = lines.map(\.start).min() ?? 0
                 EngineLogBook.note(String(format: "[sync] %d lines of track %d sent to the page, the latest from %.1f s (playing at %.1f s)",
@@ -979,6 +993,11 @@ final class AetherPlayer {
         case "mp3float": return "mp3"
         default: return codec
         }
+    }
+
+    /// A picture subtitle, by the engine's decoder name or FFmpeg's descriptor name.
+    static func isPictureCodec(_ codec: String) -> Bool {
+        ["pgssub", "dvdsub", "dvbsub", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"].contains(codec.lowercased())
     }
 
     /// ISO 639 codes for no language: undetermined, no linguistic content, uncoded, multiple.
