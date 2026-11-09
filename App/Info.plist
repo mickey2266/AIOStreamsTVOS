@@ -73,6 +73,6 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>AIOStreams connects to media servers on your local network.</string>
+	<string>AIOStreams connects to media servers on your local network, and opens its log for a phone on it when you ask.</string>
 </dict>
 </plist>

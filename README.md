@@ -194,13 +194,26 @@ When a video freezes or falls behind its sound, the same report has the playback
 buffer held ahead (and its lowest in the last 30 s), stalls, dropped frames, the rate the video
 plays at against what the source delivered, and producer restarts. A buffer that runs dry with
 the source below the video's rate is the network; a full buffer with frames dropping is the
-picture falling behind. The source is read over one held connection by default (AetherEngine's
+picture falling behind. Those figures cover the last 30 s, so the report also lists the video's last 5
+stalls with the figures as they stood when each began, where in the video it was, and a verdict from
+them: ran out of data (the source delivered less than the video plays at, or the buffer ran empty),
+the picture fell behind with the buffer full, the engine's reader restarted, or the software player,
+which keeps only 96 MB ahead. Each stall's line also goes into the engine's log in the app menu, which
+keeps it after the video. The source is read over one held connection by default (AetherEngine's
 `heldSourceConnection`, HTTP/1.1 only), rather than ranged requests that start again at least
 every 128 MB, every dozen seconds of a remux. Either way, a connection that runs below the video's
 average rate for 8 seconds while the player waits on it is replaced by a new one (three in a row,
 then it rests two minutes), as debrid CDNs often slow one connection and serve a new one at full
 speed. The menu's **Use ranged source requests** switches back,
 from the next video, and **Hold one source connection** returns to the default.
+
+The menu's **Open the log on a phone…** puts the same report on the local network as a text file,
+as tvOS has no AirDrop or share sheet for an app. It shows a QR code and an address such as
+`http://192.168.1.20:8080/1a2b3c4d/aiostreams-log.txt`; a phone on the same network opens it, to keep
+or send. The address has a random part, works only while that screen shows, and serves nothing else.
+Every address in the log is cut to its host and file name first (`https://host/…/file?…`), as debrid
+links and server addresses carry tokens in their paths and queries. tvOS may ask the first time for
+the app to use the local network.
 
 The menu's **Play a test video…** plays an http(s) link you type (a file or an HLS playlist; the
 last one is remembered) in the page's own player, with its controls, track menus, statistics and
@@ -467,7 +480,7 @@ Back behaviour and the bundled-player path. It also means:
 | Up from a searchable list's top entry | Opens the keyboard to search (a held Up, or a quick run of presses, stops at the top instead) |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
-| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), play a test video from a link, reload, switch the source connection, turn the Dolby primer on or off, or reset the app's data |
+| **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), open them on a phone as a text file, play a test video from a link, reload, switch the source connection, turn the Dolby primer on or off, or reset the app's data |
 | Siri: "go to 30 minutes", "skip ahead 2 minutes" | Seeks or skips the video, by as much as was asked for (10 seconds when tvOS gives no length), and plays it from where it lands, whether it played or was paused before. Siri over the app pauses the video, as anything tvOS draws over it does, and the seek used to land paused |
 
 ## Saved data

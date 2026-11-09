@@ -605,7 +605,11 @@ final class AetherPlayer {
                 // Waiting for data mid-play; a seek, a load and a track switch's reload wait too, by design.
                 if buffering, self.engine.hasFirstFrameReadyForDisplay, !self.engine.isSeeking,
                    self.engine.state == .playing || self.engine.state == .paused {
-                    self.health.stalled()
+                    self.health.stalled(position: self.engine.clock.currentTime,
+                                        softwareRoute: self.engine.videoRoute == .software)
+                    if let stall = self.health.stallRecord.last {
+                        EngineLogBook.note("[player] stall: \(stall.verdict) (\(stall.figures))")
+                    }
                 }
             }
             .store(in: &watching)

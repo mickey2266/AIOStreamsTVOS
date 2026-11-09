@@ -334,7 +334,11 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines += KeyboardReport.lines
         let held = AetherPlayer.heldSourceConnection
         let priming = AudioOutput.primerEnabled
-        let menu = AppMenu(title: "AIOStreams", text: lines.joined(separator: "\n"), actions: [
+        let report = lines.joined(separator: "\n")
+        let menu = AppMenu(title: "AIOStreams", text: report, actions: [
+            AppMenu.Action(title: "Open the log on a phone…", destructive: false) { [weak self] in
+                self?.shareLog(report)
+            },
             AppMenu.Action(title: "Play a test video…", destructive: false) { [weak self] in self?.askTestVideo() },
             AppMenu.Action(title: "Reload", destructive: false) { [weak self] in self?.loadPage() },
             AppMenu.Action(title: held ? "Use ranged source requests" : "Hold one source connection", destructive: false) {
@@ -357,6 +361,16 @@ final class MainViewController: UIViewController, RemoteReceiver {
         // However it closed: an action, Close or Menu.
         menu.closed = { [weak self] in self?.web?.focusPage() }
         present(menu, animated: true)
+    }
+
+    /// The app menu's `report` as a text file a phone on the same network opens (`LogShareScreen`).
+    private func shareLog(_ report: String) {
+        guard presentedViewController == nil else { return }
+        let when = DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .medium)
+        let header = "AIOStreams for Apple TV \(Identity.version), tvOS \(UIDevice.current.systemVersion), \(when)"
+        let screen = LogShareScreen(text: header + "\n\n" + report + "\n")
+        screen.closed = { [weak self] in self?.web?.focusPage() }
+        present(screen, animated: true)
     }
 
     private func confirmReset() {
