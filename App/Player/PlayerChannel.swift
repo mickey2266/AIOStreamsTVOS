@@ -139,9 +139,20 @@ final class PlayerChannel: PlayerListener {
                     positionMs: message.number("positionMs"),
                     showingMs: message.number("showingMs")
                 )
-            // No subtitle index here: the page goes without it.
+            // Every one of the file's own subtitles' lines from its index, by track; null without one.
             case "player-subtitle-index":
-                send(["type": "player-subtitle-index", "tracks": NSNull()])
+                Task { [weak self] in
+                    let tracks = await self?.player.subtitleIndex()
+                    var answer: Any = NSNull()
+                    if let tracks {
+                        var byTrack: [String: [Message]] = [:]
+                        for (id, lines) in tracks {
+                            byTrack[String(id)] = lines.map { line -> Message in ["startMs": line.start, "endMs": line.end] }
+                        }
+                        answer = byTrack
+                    }
+                    self?.send(["type": "player-subtitle-index", "tracks": answer])
+                }
             // The file's own track's line times, for the page's automatic subtitle sync; no track stops.
             case "player-subtitle-lines":
                 let track = message.text("track")

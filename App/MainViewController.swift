@@ -500,7 +500,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
         case "app-info":
             sendToPage(AppAnswers.appInfo())
         case "log":
-            // The page's `appLog`, into the app's log. Its subtitle sync lines (`[sync]`, patches/web/0025) also go
+            // The page's `appLog`, into the app's log. Its subtitle sync lines (`[sync]`, patches/web/0025 and 0026) also go
             // into the app menu's report, beside the app's own; the rest, such as live recovery's, would crowd it.
             let line = String((message.text("message") ?? "").prefix(400))
             if line.hasPrefix("[sync]") {

@@ -367,29 +367,52 @@ final class AetherPlayer {
     }
 
     /**
-     * A live channel loaded again on AVPlayer for its sound (`liveOnAVPlayer`) started frozen on its first
-     * picture, and played, with sound, after a pause and play: `play()` takes a live playhead that has
-     * fallen out of the window to the edge. The same once, when the clock hasn't moved by `frozenStartWait`
-     * and the page hasn't paused it.
+     * A live channel loaded again on AVPlayer for its sound (`liveOnAVPlayer`) starts frozen on its first
+     * picture, and plays, with sound, after a pause and play. The app does that pause and play itself,
+     * once, `frozenStartWait` after the load, unless the page has paused it.
+     *
+     * The first try (7fda951) went to the live edge and played, and only when the clock had moved under
+     * half a second: it didn't unfreeze the channel. Likely reasons, from the engine's code: on AVPlayer's
+     * own playlist reading the edge seek returns early when the engine has no live window, `play()` on an
+     * AVPlayer already at rate 1 changes nothing, and the clock may move while the picture holds. A pause and play is what the viewer does,
+     * so it goes whether or not the clock moved, which the log line keeps for the report.
      */
     private func nudgeFrozenLiveStart() {
         let generation = generation
         let startedAt = engine.clock.currentTime
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.frozenStartWait * 1_000_000_000))
-            guard let self, generation == self.generation, self.current != nil, !self.ended, !self.paused else { return }
+            guard let self, generation == self.generation, self.current != nil, !self.ended,
+                  !self.paused, !self.holdingForLink, !self.reopening else { return }
             let moved = self.engine.clock.currentTime - startedAt
-            guard moved < 0.5 else { return }
-            EngineLogBook.note(String(format: "[player] the live channel on AVPlayer moved %.1f s in %.0f s; to the live edge and playing",
-                                      moved, Self.frozenStartWait))
-            await self.engine.seekToLiveEdge()
-            guard generation == self.generation, self.current != nil, !self.ended, !self.paused else { return }
-            self.engine.play()
+            EngineLogBook.note(String(format: "[player] the live channel on AVPlayer moved %.1f s in %.0f s (%@, %@); pausing and playing it once",
+                                      moved, Self.frozenStartWait, "\(self.engine.state)",
+                                      self.engine.isBuffering ? "buffering" : "not buffering"))
+            // Hidden from the page, as `settleAudio`'s pause and play is.
+            self.reopening = true
+            self.engine.pause()
+            try? await Task.sleep(nanoseconds: UInt64(Self.frozenPauseSeconds * 1_000_000_000))
+            guard generation == self.generation, self.current != nil, !self.ended else {
+                self.reopening = false
+                return
+            }
+            // Paused from the page meanwhile: it stays paused, and the page already knows.
+            if !self.paused { self.engine.play() }
+            // The play's own state change arrives after this call.
+            DispatchQueue.main.async { self.reopening = false }
+            guard !self.paused else { return }
+            let resumedAt = self.engine.clock.currentTime
+            try? await Task.sleep(nanoseconds: UInt64(Self.frozenStartWait * 1_000_000_000))
+            guard generation == self.generation, self.current != nil, !self.ended else { return }
+            EngineLogBook.note(String(format: "[player] after the pause and play, the live channel moved %.1f s in %.0f s",
+                                      self.engine.clock.currentTime - resumedAt, Self.frozenStartWait))
         }
     }
 
-    /// How long a live channel reloaded on AVPlayer gets to start moving before it's taken to the edge.
+    /// How long a live channel reloaded on AVPlayer plays before the app pauses and plays it.
     private static let frozenStartWait: TimeInterval = 3
+    /// The pause between, about a viewer's press and press again.
+    private static let frozenPauseSeconds: TimeInterval = 0.5
 
     /**
      * How long the start is held for the soundbar to take the Dolby and widen the link, and how often
@@ -892,12 +915,60 @@ final class AetherPlayer {
     private var watchedTrack: Int?
     private var sentLines = Set<String>()
     private var lineWatch: AnyCancellable?
+    private var indexWatch: Task<Void, Never>?
+    /// The file's subtitle index, read once per file (`SubtitleIndex`); nil inside for a file without one.
+    private var fileIndex: (url: String, timelines: Task<[SubtitleIndex.Timeline]?, Never>)?
 
     /**
-     * The page's `player-subtitle-lines`: the times of `id`'s lines as they come, for its automatic
-     * subtitle sync, which compares them with an added subtitle's. The engine decodes the track on its
-     * second subtitle channel, so what's on screen is untouched. Nil, or a track that isn't the file's
-     * own, stops.
+     * The page's `player-subtitle-index`: when each of the file's own subtitles' lines show, by the
+     * engine's track id, from the file's index; nil without one. The index lists the subtitles in file
+     * order, the engine's ids are FFmpeg's stream indexes, also in file order, so the two pair up
+     * when they count the same tracks of the same kinds, as the desktop app pairs them with mpv's.
+     */
+    func subtitleIndex() async -> [Int: [(start: Double, end: Double)]]? {
+        guard let request = current, let url = URL(string: request.url) else { return nil }
+        if fileIndex?.url != request.url {
+            let headers = request.headers
+            fileIndex = (request.url, Task {
+                do {
+                    let timelines = try await SubtitleIndex.read(url: url, headers: headers)
+                    EngineLogBook.note("[sync] the file's index lists \(timelines.count) subtitle tracks: "
+                        + timelines.map { "\($0.codec) \($0.lines.count) lines" }.joined(separator: ", "))
+                    return timelines
+                } catch {
+                    EngineLogBook.note("[sync] no index of the file's subtitles: \(error)")
+                    return nil
+                }
+            })
+        }
+        guard let timelines = await fileIndex?.timelines.value, !timelines.isEmpty,
+              current?.url == request.url else { return nil }
+        // The engine's tracks come with its read of the file's header, which may still be going on.
+        var own = ownSubtitleTracks()
+        for _ in 0..<20 where own.isEmpty && current?.url == request.url {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            own = ownSubtitleTracks()
+        }
+        guard own.count == timelines.count,
+              zip(own, timelines).allSatisfy({ Self.isPictureCodec($0.codec) == $1.isPicture }) else {
+            EngineLogBook.note("[sync] the file's index doesn't pair with the player's subtitles: index "
+                + timelines.map(\.codec).joined(separator: ", ") + "; player "
+                + own.map { "\($0.id) \($0.codec)" }.joined(separator: ", "))
+            return nil
+        }
+        return Dictionary(uniqueKeysWithValues: zip(own, timelines).map { ($0.id, $1.lines) })
+    }
+
+    private func ownSubtitleTracks() -> [TrackInfo] {
+        engine.subtitleTracks.filter { !$0.isExternal }.sorted { $0.id < $1.id }
+    }
+
+    /**
+     * The page's `player-subtitle-lines`: the times of `id`'s lines, for its automatic subtitle sync,
+     * which compares them with an added subtitle's. All at once from the file's index where it has
+     * one; otherwise, and for a text track also, as the engine decodes the track on its second
+     * subtitle channel, so what's on screen is untouched. Nil, or a track that isn't the file's own,
+     * stops.
      */
     func watchLines(track id: String?, onLines: @escaping ([Message]) -> Void) {
         endLineWatch()
@@ -911,46 +982,111 @@ final class AetherPlayer {
             return EngineLogBook.note("[sync] the page asked for track \(id)'s lines, which isn't one of the file's own")
         }
         watchedTrack = index
-        EngineLogBook.note("[sync] reading track \(index)'s lines (\(track.codec), \(track.language ?? "no language")) for the page's subtitle sync")
-        engine.selectSecondarySubtitleTrack(index: index)
-        var reported = 0
-        /*
-         * A picture subtitle (PGS, DVD, DVB) has no end of its own: the next packet on its stream closes
-         * it, so the engine publishes each with an open placeholder end and trims it once that packet
-         * comes. Sent as start and end, each picture reached the page twice, once with the placeholder's
-         * length, and the page's match on those found nothing it was sure of, so a PGS reference never
-         * synced. A picture goes once, by its start, and the latest of each update waits for a later one,
-         * which shows its end is the authored one. A text line's end is its own from the first.
-         */
         let pictures = Self.isPictureCodec(track.codec)
-        lineWatch = engine.$secondarySubtitleCues.sink { [weak self] cues in
-            guard let self, self.watchedTrack == index else { return }
-            let timed = cues.filter { $0.endTime > $0.startTime }.sorted { $0.startTime < $1.startTime }
-            var lines: [(start: Double, end: Double)] = []
-            for cue in pictures ? Array(timed.dropLast()) : timed {
-                // Cues come again as the decoded window moves; each line goes once.
-                let key = pictures ? "\(cue.startTime)" : "\(cue.startTime)|\(cue.endTime)"
-                guard self.sentLines.insert(key).inserted else { continue }
-                lines.append((cue.startTime, cue.endTime))
+        /*
+         * Every line from the file's index at once where it has one, as AIOStreams' desktop and Android
+         * apps send them: the page's match then has the whole file and settles in a moment, a subtitle
+         * timed for another frame rate included, whose drift a few minutes of lines hide. A text track's
+         * lines then come from the engine's decode as well, for any the index leaves out; a picture
+         * track's come from the index alone, as its decoded ends can still change after it shows.
+         */
+        indexWatch = Task { [weak self] in
+            let indexed = await self?.subtitleIndex()?[index]
+            guard let self, !Task.isCancelled, self.watchedTrack == index else { return }
+            if let indexed, indexed.count >= Self.fewestIndexedLines {
+                EngineLogBook.note(String(format: "[sync] %d lines of track %d from the file's index sent to the page, %.1f s to %.1f s",
+                                          indexed.count, index, (indexed.first?.start ?? 0) / 1000, (indexed.last?.end ?? 0) / 1000))
+                onLines(indexed.map { line -> Message in ["startMs": line.start, "endMs": line.end] })
+                if pictures { return }
             }
-            guard !lines.isEmpty else { return }
-            // The first lines, then at 30 and 60, where the page tries a match (30 lines over a minute, 60 to
-            // stand alone), then every hundred.
-            let count = self.sentLines.count
-            if reported == 0 || (reported < 30 && count >= 30) || (reported < 60 && count >= 60)
-                || count / 100 > reported / 100 {
-                reported = self.sentLines.count
-                let first = lines.map(\.start).min() ?? 0
-                EngineLogBook.note(String(format: "[sync] %d lines of track %d sent to the page, the latest from %.1f s (playing at %.1f s)",
-                                          reported, index, first, self.engine.sourceTime))
-            }
-            onLines(lines.sorted { $0.start < $1.start }.map { line -> Message in
-                ["startMs": line.start * 1000, "endMs": line.end * 1000]
-            })
+            EngineLogBook.note("[sync] reading track \(index)'s lines (\(track.codec), \(track.language ?? "no language")) for the page's subtitle sync")
+            self.watchDecoded(index: index, pictures: pictures, onLines: onLines)
         }
     }
 
+    /// Fewer lines in the index than this and it isn't the track's: the decode gives them instead.
+    private static let fewestIndexedLines = 10
+
+    /// The lines of the file's own track `index` as the engine's second subtitle channel decodes them.
+    private func watchDecoded(index: Int, pictures: Bool, onLines: @escaping ([Message]) -> Void) {
+        engine.selectSecondarySubtitleTrack(index: index)
+        var reported = 0
+        var long = 0
+        var skipped = 0
+        var lastPlayhead: Double?
+        /*
+         * A picture subtitle (PGS, DVD, DVB) has no end of its own. The engine publishes each with an
+         * open placeholder end (49.7 days) and closes it later from the next packet on its stream, and
+         * that end can still shorten after a later picture shows: the engine withholds an end it can't
+         * vouch for yet, takes an upper bound across a stretch it hasn't read, and leaves a second
+         * picture of the same display set open. The page keeps the first end it gets for a line and
+         * drops any longer than 12 s, so taking each picture as soon as a later one came lost those
+         * lines or stretched them into the gap after, and the match never came out sure of itself.
+         * A picture goes once the playhead has passed its end, as the engine has read past it by
+         * then, one line for all the pictures of a display set. A text line's end is its own from
+         * the first.
+         */
+        lineWatch = engine.$secondarySubtitleCues
+            .combineLatest(engine.clock.$sourceTime)
+            .sink { [weak self] cues, playhead in
+                guard let self, self.watchedTrack == index else { return }
+                // A jump: pictures behind the new position may be closed at the landing rather than
+                // their own end, so the ones not sent yet stay out.
+                let jumped = lastPlayhead.map { abs(playhead - $0) > Self.lineJumpSeconds } ?? false
+                lastPlayhead = playhead
+                var lines: [(start: Double, end: Double)] = []
+                if pictures {
+                    // A display set's pictures share its start; the line ends with the last of them.
+                    var ends: [Double: Double] = [:]
+                    for cue in cues where cue.endTime > cue.startTime {
+                        let open = cue.endTime - cue.startTime >= Self.openEndedSeconds
+                        ends[cue.startTime] = max(ends[cue.startTime] ?? 0, open ? .infinity : cue.endTime)
+                    }
+                    for (start, end) in ends where start < playhead {
+                        let key = "\(start)"
+                        if jumped {
+                            if self.sentLines.insert(key).inserted { skipped += 1 }
+                            continue
+                        }
+                        guard end <= playhead, self.sentLines.insert(key).inserted else { continue }
+                        lines.append((start, end))
+                    }
+                } else {
+                    for cue in cues where cue.endTime > cue.startTime
+                        && cue.endTime - cue.startTime < Self.openEndedSeconds {
+                        // Cues come again as the decoded window moves; each line goes once.
+                        guard self.sentLines.insert("\(cue.startTime)|\(cue.endTime)").inserted else { continue }
+                        lines.append((cue.startTime, cue.endTime))
+                    }
+                }
+                guard !lines.isEmpty else { return }
+                long += lines.filter { $0.end - $0.start > Self.longestLineSeconds }.count
+                // The first lines, then at 30 and 60, where the page tries a match (30 lines over a minute, 60 to
+                // stand alone), then every hundred.
+                let count = self.sentLines.count - skipped
+                if reported == 0 || (reported < 30 && count >= 30) || (reported < 60 && count >= 60)
+                    || count / 100 > reported / 100 {
+                    reported = count
+                    EngineLogBook.note(String(format: "[sync] %d lines of track %d sent to the page, from %.1f s to %.1f s (playing at %.1f s); %d longer than 12 s, %d left out at jumps",
+                                              reported, index, lines.map(\.start).min() ?? 0, lines.map(\.end).max() ?? 0,
+                                              playhead, long, skipped))
+                }
+                onLines(lines.sorted { $0.start < $1.start }.map { line -> Message in
+                    ["startMs": line.start * 1000, "endMs": line.end * 1000]
+                })
+            }
+    }
+
+    /// The engine's open end for a line whose end hasn't come, an hour being past any authored one.
+    private static let openEndedSeconds: Double = 3600
+    /// The page's longest line; longer ones it takes for signs or songs and leaves out of the match.
+    private static let longestLineSeconds: Double = 12
+    /// A playhead move between two of the clock's ticks that only a seek makes.
+    private static let lineJumpSeconds: Double = 3
+
     private func endLineWatch() {
+        indexWatch?.cancel()
+        indexWatch = nil
         lineWatch = nil
         sentLines = []
         guard watchedTrack != nil else { return }

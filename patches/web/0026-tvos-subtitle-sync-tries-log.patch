@@ -1,0 +1,42 @@
+diff --git a/packages/web/src/lib/subtitles/auto-sync.ts b/packages/web/src/lib/subtitles/auto-sync.ts
+--- a/packages/web/src/lib/subtitles/auto-sync.ts
++++ b/packages/web/src/lib/subtitles/auto-sync.ts
+@@ -172,7 +172,9 @@ export class SubtitleSync {
+     private readonly target: Span[],
+     private readonly limitMs: number,
+     private readonly positionMs: () => number,
+-    asked = false
++    asked = false,
++    /** Told what each try found, for the Apple TV app's log (AIOStreamsTVOS). */
++    private readonly onTry?: (note: string) => void
+   ) {
+     this.patience = asked ? SURE_LINES : GIVE_UP_LINES;
+   }
+@@ -194,6 +196,14 @@ export class SubtitleSync {
+       return null;
+     this.triedAt = this.received;
+     const found = alignSubtitles(reference, this.target, this.limitMs);
++    /* eslint-disable lingui/no-unlocalized-strings -- the Apple TV app's own log (AIOStreamsTVOS) */
++    this.onTry?.(
++      `try with ${reference.length} of ${count} lines, ${(reference[0].startMs / 1000).toFixed(1)}-${(reference.at(-1)!.endMs / 1000).toFixed(1)} s, at ${(this.positionMs() / 1000).toFixed(1)} s: ` +
++        (found
++          ? `delay ${found.delayMs} ms, ratio ${found.ratio.toFixed(4)}, ${found.confident ? 'sure' : 'not sure'}`
++          : 'no speech to match')
++    );
++    /* eslint-enable lingui/no-unlocalized-strings */
+     const last = this.last;
+     this.last = found;
+     if (!found?.confident) {
+diff --git a/packages/web/src/lib/playback/use-player.ts b/packages/web/src/lib/playback/use-player.ts
+--- a/packages/web/src/lib/playback/use-player.ts
++++ b/packages/web/src/lib/playback/use-player.ts
+@@ -593,7 +593,8 @@ export function usePlayer(
+           cues,
+           SUBTITLE_DELAY_LIMIT_MS,
+           () => playhead.positionMs,
+-          asked
++          asked,
++          (note) => appLog('info', `[sync] ${shown}: ${note}`)
+         );
+         const taker = (lines: Span[]) => take(sync, text, lines);
+         taker(history.lines);
