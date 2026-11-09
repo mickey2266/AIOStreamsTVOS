@@ -25,6 +25,8 @@ final class NowPlaying {
     private weak var session: MPNowPlayingSession?
     private var sharedCommands = false
     private var watching = Set<AnyCancellable>()
+    /// A seek or skip came from the system, such as Siri's "go to 30 minutes", after it went to the page.
+    var onSeek: () -> Void = {}
 
     init(engine: AetherEngine, send: @escaping (Message) -> Void) {
         self.engine = engine
@@ -80,11 +82,16 @@ final class NowPlaying {
     }
 
     /// The system calls command handlers on the main thread.
-    private func handle(_ command: MPRemoteCommand, _ key: @escaping @MainActor (MPRemoteCommandEvent) -> Message?) {
+    private func handle(
+        _ command: MPRemoteCommand,
+        seeks: Bool = false,
+        _ key: @escaping @MainActor (MPRemoteCommandEvent) -> Message?
+    ) {
         command.addTarget { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self, let key = key(event) else { return .commandFailed }
                 self.send(["type": "media-key", "key": key])
+                if seeks { self.onSeek() }
                 return .success
             }
         }
@@ -105,15 +112,22 @@ final class NowPlaying {
         handle(center.pauseCommand) { _ in ["action": "pause"] }
         handle(center.togglePlayPauseCommand) { _ in ["action": "toggle"] }
         handle(center.stopCommand) { _ in ["action": "stop"] }
-        handle(center.changePlaybackPositionCommand) { event in
+        handle(center.changePlaybackPositionCommand, seeks: true) { event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return nil }
             return ["action": "seek", "position": event.positionTime * 1000]
         }
-        handle(center.skipForwardCommand) { _ in ["action": "skip", "offset": 10_000] }
-        handle(center.skipBackwardCommand) { _ in ["action": "skip", "offset": -10_000] }
+        handle(center.skipForwardCommand, seeks: true) { ["action": "skip", "offset": Self.skipMs($0)] }
+        handle(center.skipBackwardCommand, seeks: true) { ["action": "skip", "offset": -Self.skipMs($0)] }
         handle(center.nextTrackCommand) { _ in ["action": "next"] }
         handle(center.previousTrackCommand) { _ in ["action": "previous"] }
         updateTrackCommands()
+    }
+
+    /// The skip's length in ms: the interval asked for, such as Siri's "skip ahead 2 minutes", or 10 s.
+    private static func skipMs(_ event: MPRemoteCommandEvent) -> Double {
+        guard let interval = (event as? MPSkipIntervalCommandEvent)?.interval,
+              interval.isFinite, interval > 0 else { return 10_000 }
+        return interval * 1000
     }
 
     /// Next and previous, where the page has them for the item.

@@ -468,6 +468,7 @@ Back behaviour and the bundled-player path. It also means:
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |
 | Play/Pause                          | Play/Pause                                        |
 | **Hold Play/Pause (1 s)**           | App menu: the app's diagnostics (move left onto them, then swipe or click up and down to scroll), play a test video from a link, reload, switch the source connection, turn the Dolby primer on or off, or reset the app's data |
+| Siri: "go to 30 minutes", "skip ahead 2 minutes" | Seeks or skips the video, by as much as was asked for (10 seconds when tvOS gives no length), and plays it from where it lands, whether it played or was paused before. Siri over the app pauses the video, as anything tvOS draws over it does, and the seek used to land paused |
 
 ## Saved data
 

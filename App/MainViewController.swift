@@ -245,6 +245,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
                 }
             )
             self.player = player
+            player.nowPlaying.onSeek = { [weak self] in self?.seekedFromSystem() }
             let pip = PictureInPicture(player: engine, channel: player, send: { [weak self] in self?.sendToPage($0) })
             pip.failed = { [weak self] in self?.flashStatus($0) }
             pip.window = { [weak self] in self?.view.window }
@@ -597,10 +598,16 @@ final class MainViewController: UIViewController, RemoteReceiver {
         input.forgetPresses()
         pip?.appWillResignActive()
         // The picture-in-picture window keeps playing over the Home screen.
-        if pip?.active != true { player?.change(Change(paused: true)) }
+        if pip?.active != true {
+            player?.change(Change(paused: true))
+            pausedForOverlay = player?.playing == true
+            overlayGeneration += 1
+        }
     }
 
     func appDidEnterBackground() {
+        // Gone to the Home screen or another app, not Siri over the video: it stays paused.
+        pausedForOverlay = false
         pip?.appDidEnterBackground()
     }
 
@@ -609,5 +616,30 @@ final class MainViewController: UIViewController, RemoteReceiver {
     func appDidBecomeActive() {
         pip?.appDidBecomeActive()
         web?.focusPage()
+        // Siri's seek can come just after it closes, so the pause is remembered a moment longer.
+        let generation = overlayGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.overlaySeekWait) { [weak self] in
+            guard let self, generation == self.overlayGeneration else { return }
+            self.pausedForOverlay = false
+        }
+    }
+
+    /**
+     * Siri, or anything else tvOS draws over the app, takes the app's focus, which pauses the video
+     * (`appWillResignActive`), and a seek Siri was asked for ("go to 30 minutes") then landed paused.
+     * This is set while a video is loaded and the app hasn't gone to the background since it lost its
+     * focus, and a seek from the system then plays the video once the page has seeked
+     * (`seekedFromSystem`), whether it played or was paused before Siri.
+     */
+    private var pausedForOverlay = false
+    private var overlayGeneration = 0
+    /// How long after the app gets its focus back a seek from Siri still plays the video.
+    private static let overlaySeekWait: TimeInterval = 3
+
+    /// A seek or skip from Siri or the system's Now Playing controls, already sent to the page.
+    private func seekedFromSystem() {
+        guard pausedForOverlay else { return }
+        pausedForOverlay = false
+        player?.playAfterNextSeek()
     }
 }

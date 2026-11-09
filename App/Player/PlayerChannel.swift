@@ -36,6 +36,33 @@ final class PlayerChannel: PlayerListener {
     /// A file is loaded, playing or paused.
     var playing: Bool { loaded }
 
+    /// A file is loaded and playing, not paused.
+    var playingNow: Bool { loaded && state.flag("paused") == false && state.flag("idle") != true }
+
+    /// Waiting for the page's seek from a system seek, to play once it arrives (`playAfterNextSeek`).
+    private var resumeWaiting = 0
+    private var resumeAsked = false
+    /// The page's seek for a system seek comes back within this; the video plays after it anyway.
+    private static let resumeWait: TimeInterval = 1.5
+
+    /// Plays once the page's next seek arrives, or after `resumeWait` without one: a seek from Siri, which
+    /// the page turns into its own seek and sends back, lands playing.
+    func playAfterNextSeek() {
+        resumeWaiting += 1
+        resumeAsked = true
+        let asked = resumeWaiting
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.resumeWait) { [weak self] in
+            guard let self, self.resumeAsked, asked == self.resumeWaiting else { return }
+            self.resume()
+        }
+    }
+
+    private func resume() {
+        resumeAsked = false
+        guard loaded else { return }
+        player.change(Change(paused: false))
+    }
+
 
     /// The page closed the player, so a picture-in-picture window has nothing left to show.
     var onStopped: () -> Void = {}
@@ -65,7 +92,10 @@ final class PlayerChannel: PlayerListener {
             case "player-set":
                 player.change(try PlayerProtocol.change(message))
             case "player-seek":
-                if let at = message.number("positionMs") { player.seek(at) }
+                if let at = message.number("positionMs") {
+                    player.seek(at)
+                    if resumeAsked { resume() }
+                }
             case "player-subtitle-add":
                 let url = message.text("url") ?? ""
                 guard PlayerProtocol.isWebURL(url), let address = URL(string: url) else {
@@ -194,7 +224,7 @@ final class PlayerChannel: PlayerListener {
 
     /// Keeps the screen saver off while a video plays.
     private func updateIdleTimer() {
-        let playing = loaded && state.flag("paused") == false && state.flag("idle") != true
+        let playing = playingNow
         if UIApplication.shared.isIdleTimerDisabled != playing {
             UIApplication.shared.isIdleTimerDisabled = playing
         }
