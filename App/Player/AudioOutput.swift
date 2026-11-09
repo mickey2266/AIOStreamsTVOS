@@ -259,13 +259,29 @@ enum EngineLogBook {
     /// The lines that say which way a video went and why it failed: the probe, the HLS reroutes
     /// (AE#154 and AE#246 to AVPlayer, AE#363 and AE#678 to the engine's live reader) and AVPlayer giving up.
     private static let loadWords = ["probe failed", "ae#154", "ae#246", "ae#363", "ae#678", "failedtoplaytoend",
-                                    "hls playlist body", "[player]"]
+                                    "hls playlist body", "[player]", "pump qos"]
+    /// When the engine last said its segment producer ran below real time at its lower priority
+    /// (`[HLSSegmentProducer] pump qos:`, AE#850): a session too heavy for the Apple TV, such as a 4K
+    /// remux with its Atmos objects rendered, which the stall verdict names.
+    private static var producerSlowAt: Date?
+
+    /// The producer ran below real time since `date`.
+    static func producerSlow(since date: Date) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return producerSlowAt.map { $0 >= date } ?? false
+    }
 
     /// The engine calls the handler from its own threads, so this keeps no main-thread state.
     static func install() {
         EngineLog.handler = { line in
             NSLog("[aether] %@", line)
             let lower = line.lowercased()
+            if lower.contains("pump qos") {
+                lock.lock()
+                producerSlowAt = Date()
+                lock.unlock()
+            }
             guard audioWords.contains(where: { lower.contains($0) })
                 || loadWords.contains(where: { lower.contains($0) }) else { return }
             keep(line)

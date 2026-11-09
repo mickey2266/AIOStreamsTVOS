@@ -36,6 +36,9 @@ struct PlaybackHealth {
     /// How many stalls the record keeps, newest last.
     static let keptStalls = 5
 
+    /// When this video loaded, so a slow producer the engine reported for an earlier one doesn't count.
+    let startedAt = Date()
+
     private var samples: [Sample] = []
     private(set) var latest: LiveTelemetry?
     /// Times playback stopped to wait for data, after the first picture and outside seeks and reloads.
@@ -67,12 +70,14 @@ struct PlaybackHealth {
     }
 
     /// `position` is where in the video it stalled, in seconds; `softwareRoute` is the engine's software
-    /// player, which keeps a fixed 96 MB ahead in memory whatever the Cache size.
-    mutating func stalled(position: Double?, softwareRoute: Bool) {
+    /// player, which keeps a fixed 96 MB ahead in memory whatever the Cache size. `producerSlow` is the
+    /// engine having said its segment producer ran below real time this video (AE#850), and
+    /// `objectAudio` the Atmos or DTS:X objects being rendered (the page's Object audio switch).
+    mutating func stalled(position: Double?, softwareRoute: Bool, producerSlow: Bool, objectAudio: Bool) {
         stalls += 1
         let now = Date()
         lastStallAt = now
-        let (verdict, figures) = judge(softwareRoute: softwareRoute)
+        let (verdict, figures) = judge(softwareRoute: softwareRoute, producerSlow: producerSlow, objectAudio: objectAudio)
         stallRecord.append(Stall(at: now, position: position, verdict: verdict, figures: figures))
         if stallRecord.count > Self.keptStalls { stallRecord.removeFirst(stallRecord.count - Self.keptStalls) }
     }
@@ -90,14 +95,24 @@ struct PlaybackHealth {
      * - the engine's reader restarted in the window: that alone can stall it.
      * "Source delivered" counts the pauses the engine takes with the buffer full, so it reads low then;
      * a stall comes with the buffer low, when the engine is fetching all the time.
+     *
+     * A segment producer the engine reported below real time comes first: it reads the source only as
+     * fast as it produces, so the source then looks slow too, and "ran out of data" would blame the
+     * network for what the Apple TV's processor couldn't keep up with.
      */
-    private func judge(softwareRoute: Bool) -> (verdict: String, figures: String) {
+    private func judge(softwareRoute: Bool, producerSlow: Bool, objectAudio: Bool) -> (verdict: String, figures: String) {
         let covered = Int(span.rounded())
         let buffer = latest?.forwardBufferSeconds
         let video = latest?.instantBitrateMbps
         let source = sourceMbps
         var causes: [String] = []
-        if let source, let video, video > 0, source < video * 0.95 {
+        if producerSlow {
+            causes.append(objectAudio
+                ? "likely the engine's producer near real time with the Atmos objects rendered (Object audio on); "
+                    + "the source then reads slowly too, so its rate says little"
+                : "likely the engine's producer near real time on this Apple TV; "
+                    + "the source then reads slowly too, so its rate says little")
+        } else if let source, let video, video > 0, source < video * 0.95 {
             causes.append("ran out of data: the source delivered \(Self.mbps(source)) for a \(Self.mbps(video)) video")
         } else if let lowest = lowestBuffer ?? buffer, lowest < 1 {
             causes.append("ran out of data: the buffer ran empty"

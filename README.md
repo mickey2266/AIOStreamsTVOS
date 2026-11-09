@@ -198,7 +198,13 @@ picture falling behind. Those figures cover the last 30 s, so the report also li
 stalls with the figures as they stood when each began, where in the video it was, and a verdict from
 them: ran out of data (the source delivered less than the video plays at, or the buffer ran empty),
 the picture fell behind with the buffer full, the engine's reader restarted, or the software player,
-which keeps only 96 MB ahead. The last 10 stalls across videos are also listed apart from the engine's
+which keeps only 96 MB ahead. When the engine has said this video that its segment producer ran below
+real time at its lower priority (`pump qos`, AE#850), the verdict names the producer instead of the
+source, which it reads only as fast as it produces, and the report says so; on an Apple TV 4K (A15) a
+4K Dolby Vision remux with its TrueHD Atmos rendered (**Object audio** on) measured only 1.15 to 1.25
+times real time even at the higher
+priority, so turning Object audio off is the first thing to try. The engine's `pump qos` line stays in
+its log in the app menu. The last 10 stalls across videos are also listed apart from the engine's
 log, with the time and the video, so its audio and loading lines can't push them out. Once a video
 stops, ends or fails, the report keeps it as **Last video**: its name, how it ended and where, its
 tracks, route, playback health and stalls as they stood then. It shows while nothing plays, and stays

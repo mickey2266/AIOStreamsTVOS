@@ -613,7 +613,9 @@ final class AetherPlayer {
                 if buffering, self.engine.hasFirstFrameReadyForDisplay, !self.engine.isSeeking,
                    self.engine.state == .playing || self.engine.state == .paused {
                     self.health.stalled(position: self.engine.clock.currentTime,
-                                        softwareRoute: self.engine.videoRoute == .software)
+                                        softwareRoute: self.engine.videoRoute == .software,
+                                        producerSlow: EngineLogBook.producerSlow(since: self.health.startedAt),
+                                        objectAudio: self.engine.liveTelemetry?.objectAudio != nil)
                     if let stall = self.health.stallRecord.last {
                         let time = DateFormatter.localizedString(from: stall.at, dateStyle: .none, timeStyle: .medium)
                         let name = self.title ?? self.current.flatMap { URL(string: $0.url)?.lastPathComponent } ?? "?"
@@ -1159,6 +1161,12 @@ final class AetherPlayer {
         var connection = "Source connection: " + (openedHeld ? "held (one connection)" : "ranged requests")
         if openedHeld != Self.heldSourceConnection { connection += "; the next video opens with the other" }
         lines.append(connection)
+        if EngineLogBook.producerSlow(since: health.startedAt) {
+            let objects = engine.liveTelemetry?.objectAudio != nil
+            lines.append("Segment producer: below real time at its lower priority this video, so the engine keeps it at "
+                + "the higher one (AE#850); a session this heavy may only just keep up, and the buffer grows slowly"
+                + (objects ? ". Object audio is the likely weight: turning it off drops the object render and the APAC encode" : ""))
+        }
         lines += health.lines
         return lines
     }
