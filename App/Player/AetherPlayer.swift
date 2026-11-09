@@ -75,6 +75,15 @@ final class AetherPlayer {
     private var openedHeld = false
     /// The file is loading, or playing, again as live after AVPlayer gave up on it (`failed`), so it isn't again.
     private var reloadedAsLive = false
+    /**
+     * The live channel is loading, or playing, again on AVPlayer (`LoadOptions.nativeRemoteHLS`) because the
+     * engine's live-ingest reader identified none of its audio (`loaded`), so it isn't again. Seen on an IPTV
+     * channel with two AC-3 tracks: "Could not find codec parameters ... unspecified sample rate" with the
+     * full 60 s probe, then "error decoding the audio block", and a silent picture, where other players had
+     * sound. AVPlayer reads the playlist itself and decodes AC-3; a picture it can't show (HEVC in MPEG-TS)
+     * goes back to the ingest reader by the engine's own fallback (`nativeRemoteHLSIngestFallback`).
+     */
+    private var liveOnAVPlayer = false
 
     /// A URL for the log: its host and the end of its path, without the query, where tokens go.
     static func shortened(_ url: URL) -> String {
@@ -138,15 +147,19 @@ final class AetherPlayer {
     }
 
     /// `asLive`: loaded again as live after AVPlayer gave up on it as a finished video (`failed`).
-    private func start(_ request: LoadRequest, asLive: Bool = false) {
+    /// `onAVPlayer`: a live channel loaded again on AVPlayer, its audio unidentified on the engine's reader (`loaded`).
+    private func start(_ request: LoadRequest, asLive: Bool = false, onAVPlayer: Bool = false) {
         guard let url = URL(string: request.url) else { return }
         reloadedAsLive = asLive
+        liveOnAVPlayer = onAVPlayer
         if current != nil, !ended {
-            keepLastVideo(ending: asLive ? "loaded again as live" : "another video took its place")
-            listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil)
+            keepLastVideo(ending: onAVPlayer ? "loaded again on AVPlayer for its sound"
+                : asLive ? "loaded again as live" : "another video took its place")
+            // The same channel goes on: the page isn't told it stopped.
+            if !onAVPlayer { listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil) }
         }
         // The page names the new video once it starts (`now-playing`).
-        if !asLive { title = nil }
+        if !asLive && !onAVPlayer { title = nil }
         generation += 1
         let generation = generation
         current = request
@@ -172,7 +185,7 @@ final class AetherPlayer {
         // first variant, each on a connection of its own, before the engine asks for them again) and plays
         // a raw MPEG-TS channel, which isn't a playlist, as live too. Anything else that could be a playlist
         // is asked, alongside the audio session's activation rather than after it.
-        let declaredLive = asLive || request.live
+        let declaredLive = asLive || onAVPlayer || request.live
         let checks = !declaredLive && !request.isTrailer && LiveHLS.mayBePlaylist(url)
         loading = Task { [weak self] in
             async let checked: LiveHLS.Verdict? = checks ? LiveHLS.check(url, headers: request.headers) : nil
@@ -196,6 +209,7 @@ final class AetherPlayer {
             }
             guard generation == self.generation else { return }
             if asLive { EngineLogBook.note("[player] loading again as live (\(Self.shortened(url)))") }
+            if onAVPlayer { EngineLogBook.note("[player] loading the live channel again on AVPlayer (\(Self.shortened(url)))") }
             do {
                 try await self.engine.load(
                     url: url,
@@ -221,6 +235,8 @@ final class AetherPlayer {
         // and segment request: a `.m3u8` at once, any other address once it answers with a playlist (AE#363).
         // Without this it plays the playlist in AVPlayer as a finished one.
         options.isLive = live
+        // Loaded again for its sound (`liveOnAVPlayer`): AVPlayer reads the live playlist itself.
+        if live && liveOnAVPlayer { options.nativeRemoteHLS = true }
         // The open's probe budget stays the engine's (60 s of the stream). A 5 s cap on live opens left an
         // IPTV channel's AC-3 tracks unidentified ("Could not find codec parameters ... unspecified sample
         // rate"): the session played the picture with no sound, which other players had (Nov 2026).
@@ -325,6 +341,16 @@ final class AetherPlayer {
     }
 
     private func loaded(_ request: LoadRequest) {
+        // A live channel whose audio the engine's live-ingest reader identified none of plays silent there
+        // (`liveOnAVPlayer`): once more on AVPlayer, before the page hears it loaded.
+        let audio = engine.audioTracks
+        if engine.isLive, !liveOnAVPlayer, engine.videoRoute != .remoteBypass,
+           !audio.isEmpty, audio.allSatisfy({ $0.channels <= 0 }) {
+            let codecs = Set(audio.map(\.codec)).sorted().joined(separator: ", ")
+            EngineLogBook.note("[player] live audio unidentified on the engine's reader (\(audio.count) tracks, \(codecs), 0 channels)")
+            start(request, onAVPlayer: true)
+            return
+        }
         if paused { engine.pause() }
         if speed != 1 { engine.setRate(Float(speed)) }
         applyVolume()
