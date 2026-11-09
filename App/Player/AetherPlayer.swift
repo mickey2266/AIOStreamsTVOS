@@ -570,12 +570,57 @@ final class AetherPlayer {
         }
         if let subtitle = change.subtitle {
             switch subtitle {
-            case .track(let id): if let index = Int(id) { engine.selectSubtitleTrack(index: index) }
-            case .off: engine.clearSubtitle()
+            case .track(let id):
+                if let index = Int(id) {
+                    engine.selectSubtitleTrack(index: index)
+                    checkPickedSubtitle(index)
+                }
+            case .off:
+                subtitlePickCheck?.cancel()
+                engine.clearSubtitle()
             }
         }
         if let delay = change.subtitleDelayMs { subtitles.delay = delay / 1000 }
     }
+
+    private var subtitlePickCheck: Task<Void, Never>?
+
+    /**
+     * A subtitle of the file's own picked while it plays sometimes showed nothing. The engine decodes
+     * a picked track from the packets it has kept of every subtitle stream, around the playhead; mpv,
+     * in the desktop app, reads the stream again from the playhead on every pick instead (its
+     * "refresh" seek, the buffering you see there). Here that read happens only when the pick has
+     * decoded no line `pickedSubtitleWait` later: a seek to where the video is. Both outcomes go in the
+     * app menu's log, so a track that still shows nothing says whether it had lines to draw.
+     */
+    private func checkPickedSubtitle(_ index: Int) {
+        subtitlePickCheck?.cancel()
+        guard index < AetherEngine.externalSubtitleTrackIDBase, !engine.isLive,
+              engine.hasFirstFrameReadyForDisplay,
+              let track = engine.subtitleTracks.first(where: { $0.id == index }) else { return }
+        let generation = generation
+        let name = "track \(index) (\(track.codec), \(track.language ?? "no language"))"
+        subtitlePickCheck = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleWait * 1_000_000_000))
+            guard let self, !Task.isCancelled, generation == self.generation, self.current != nil, !self.ended,
+                  self.engine.activeSubtitleTrackIndex == index else { return }
+            let lines = self.engine.subtitleCues.count
+            guard lines == 0 else {
+                return EngineLogBook.note("[subtitles] \(name) picked: \(lines) lines decoded around the playhead")
+            }
+            guard !self.engine.isSeeking else { return }
+            EngineLogBook.note(String(format: "[subtitles] %@ picked: no line decoded in %.0f s; reading the stream again from %.1f s",
+                                      name, Self.pickedSubtitleWait, self.engine.clock.currentTime))
+            await self.engine.seek(to: self.engine.clock.currentTime)
+            try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleWait * 1_000_000_000))
+            guard !Task.isCancelled, generation == self.generation, self.current != nil, !self.ended,
+                  self.engine.activeSubtitleTrackIndex == index else { return }
+            EngineLogBook.note("[subtitles] \(name) after reading again: \(self.engine.subtitleCues.count) lines decoded")
+        }
+    }
+
+    /// How long a picked subtitle has to decode a line before the stream is read again for it.
+    private static let pickedSubtitleWait: TimeInterval = 2
 
     func seek(_ positionMs: Double) {
         guard current != nil else { return }
