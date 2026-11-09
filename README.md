@@ -199,12 +199,13 @@ stalls with the figures as they stood when each began, where in the video it was
 them: ran out of data (the source delivered less than the video plays at, or the buffer ran empty),
 the picture fell behind with the buffer full, the engine's reader restarted, or the software player,
 which keeps only 96 MB ahead. When the engine has said this video that its segment producer ran below
-real time at its lower priority (`pump qos`, AE#850), the verdict names the producer instead of the
+real time at its lower priority (its `pump qos: … staying userInitiated for this session` line, AE#850;
+not the everyday `pump qos -> utility` changes, which mean it's far ahead), the verdict names the producer instead of the
 source, which it reads only as fast as it produces, and the report says so; on an Apple TV 4K (A15) a
 4K Dolby Vision remux with its TrueHD Atmos rendered (**Object audio** on) measured only 1.15 to 1.25
 times real time even at the higher
-priority, so turning Object audio off is the first thing to try. The engine's `pump qos` line stays in
-its log in the app menu. The last 10 stalls across videos are also listed apart from the engine's
+priority, so turning Object audio off is the first thing to try. That line stays in the engine's log
+in the app menu. The last 10 stalls across videos are also listed apart from the engine's
 log, with the time and the video, so its audio and loading lines can't push them out. Once a video
 stops, ends or fails, the report keeps it as **Last video**: its name, how it ended and where, its
 tracks, route, playback health and stalls as they stood then. It shows while nothing plays, and stays
@@ -452,6 +453,10 @@ Back behaviour and the bundled-player path. It also means:
   picking something in the Subtitles or Audio menu, or in what it opens, focus comes back to that
   menu's button. Play is the start for each new video, or when what had focus is gone or disabled
   (`patches/web/0022-tvos-controls-remember-focus.patch`).
+- Subtitle size has a **Smaller** step below Small, as far below it as Small is below Normal (0.64 of
+  Normal's size, where Small is 0.8), in Settings → Subtitles and in the player's subtitle options
+  (`patches/web/0023-tvos-smaller-subtitles.patch`). The size is a synced setting, so another device
+  of the same account without this patch reads Smaller as a size it doesn't know, and shows Normal.
 - With **Infuse** as the player (Settings → Playback → Player), the link names the video by its title,
   with the episode for an episode, rather than the file's name:
   `infuse://x-callback-url/play?x-success={returnUrl}&url={encodedUrl}&filename={title}&sub={subtitles}&position={position}`
@@ -484,7 +489,7 @@ Back behaviour and the bundled-player path. It also means:
 | ----------------------------------- | ------------------------------------------------- |
 | Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe up or down moves one row, or two when it's long; across, it moves as many posters as its length; an edge the swipe starts or ends on adds no arrow of its own; Left from a row's or a grid line's first poster opens the navigation)|
 | Click                               | Enter (held, the page's hold actions)             |
-| Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving off the keys closes it. The linear keyboard keeps tvOS's full-screen layout over a black backdrop, with the page showing in the space below it. The grid keyboard (Settings → General → Keyboard) sits in a black box at the screen's top right, its keys' width as measured from what tvOS draws, with the page to its left. Passwords and PINs get the keyboard in an alert |
+| Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving off the keys closes it. The Search page opens it on its own as it opens, unless it opens with a search already in it, as Back to a search's results does. The linear keyboard keeps tvOS's full-screen layout over a black backdrop, with the page showing in the space below it. The grid keyboard (Settings → General → Keyboard) sits in a black box at the screen's top right, its keys' width as measured from what tvOS draws, with the page to its left. Passwords and PINs get the keyboard in an alert |
 | Click in a searchable list          | The pickers with up and down carets, such as Discover's catalog picker: picks the highlighted entry, including the one highlighted as the list opens or after a search; opens the keyboard only when nothing is left to pick |
 | Up from a searchable list's top entry | Opens the keyboard to search (a held Up, or a quick run of presses, stops at the top instead) |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |

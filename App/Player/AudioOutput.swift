@@ -259,9 +259,13 @@ enum EngineLogBook {
     /// The lines that say which way a video went and why it failed: the probe, the HLS reroutes
     /// (AE#154 and AE#246 to AVPlayer, AE#363 and AE#678 to the engine's live reader) and AVPlayer giving up.
     private static let loadWords = ["probe failed", "ae#154", "ae#246", "ae#363", "ae#678", "failedtoplaytoend",
-                                    "hls playlist body", "[player]", "pump qos"]
+                                    "hls playlist body", "[player]", Self.producerSlowWords]
+    /// The engine's AE#850 line only: "pump qos: utility produced at 0.42x real time, below 1.00x, staying
+    /// userInitiated for this session". Its everyday `pump qos -> utility` and `-> userInitiated` lines are
+    /// the producer relaxing once it's far ahead, a sign it keeps up, and must not count.
+    private static let producerSlowWords = "staying userinitiated for this session"
     /// When the engine last said its segment producer ran below real time at its lower priority
-    /// (`[HLSSegmentProducer] pump qos:`, AE#850): a session too heavy for the Apple TV, such as a 4K
+    /// (`producerSlowWords`, AE#850): a session too heavy for the Apple TV, such as a 4K
     /// remux with its Atmos objects rendered, which the stall verdict names.
     private static var producerSlowAt: Date?
 
@@ -277,7 +281,7 @@ enum EngineLogBook {
         EngineLog.handler = { line in
             NSLog("[aether] %@", line)
             let lower = line.lowercased()
-            if lower.contains("pump qos") {
+            if lower.contains(producerSlowWords) {
                 lock.lock()
                 producerSlowAt = Date()
                 lock.unlock()

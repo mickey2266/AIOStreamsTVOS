@@ -1165,7 +1165,8 @@ final class AetherPlayer {
             let objects = engine.liveTelemetry?.objectAudio != nil
             lines.append("Segment producer: below real time at its lower priority this video, so the engine keeps it at "
                 + "the higher one (AE#850); a session this heavy may only just keep up, and the buffer grows slowly"
-                + (objects ? ". Object audio is the likely weight: turning it off drops the object render and the APAC encode" : ""))
+                + (objects ? ". Object audio is the likely weight: turning it off drops the object render, and the APAC "
+                    + "encode where the engine uses one rather than PCM" : ""))
         }
         lines += health.lines
         return lines

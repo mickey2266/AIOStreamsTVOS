@@ -503,6 +503,53 @@ enum BridgeScript {
     if (leftFrom && !document.activeElement?.closest?.(NAV_SIDE)) leftFrom = null;
   });
 
+  /** The app's keyboard for `el`, typing into it as it goes (`input`), until it closes (`done`). */
+  const openKeyboard = (el) => {
+    editing = el;
+    send({
+      type: 'tvos-keyboard',
+      value: el.value || '',
+      label:
+        el.getAttribute('aria-label') ||
+        el.placeholder ||
+        el.labels?.[0]?.textContent?.trim() ||
+        '',
+      secure: el.type === 'password',
+      email: el.type === 'email',
+      numeric:
+        el.inputMode === 'numeric' ||
+        el.inputMode === 'decimal' ||
+        el.type === 'number' ||
+        el.type === 'tel',
+      url: el.type === 'url' || el.inputMode === 'url',
+    });
+  };
+
+  /*
+   * The search page opens the keyboard on its field as it opens, as tvOS's own search does, rather
+   * than waiting for Select on the field. Only a visit that starts empty: Back to a search's
+   * results, which has its term in the address, keeps the results on screen. Each visit's field
+   * opens it once, so closing the keyboard leaves the page alone.
+   */
+  let searchOpened = null;
+  const SEARCH_FIELD_TRIES = 40;
+  const SEARCH_FIELD_WAIT = 50;
+  const openSearchKeyboard = (tries = 0) => {
+    if (location.hash.slice(1).split('?')[0] !== '/search') return;
+    const box = document.querySelector('[data-ui="search-input"]');
+    const el = box && (isTextField(box) ? box : box.querySelector('input'));
+    if (!el || !el.isConnected) {
+      // The page draws its field a moment after the address changes.
+      if (tries < SEARCH_FIELD_TRIES) setTimeout(() => openSearchKeyboard(tries + 1), SEARCH_FIELD_WAIT);
+      return;
+    }
+    if (el === searchOpened || editing || el.value) return;
+    searchOpened = el;
+    openKeyboard(el);
+  };
+  window.addEventListener('hashchange', () => openSearchKeyboard());
+  window.addEventListener('load', () => openSearchKeyboard());
+
   Object.defineProperty(window, '__aioTV', {
     value: Object.freeze({
       down(name, repeat) {
@@ -526,25 +573,8 @@ enum BridgeScript {
           : name === 'Enter' && isTextField(el);
         if (opens) {
           if (repeat) return;
-          editing = el;
           swallowed = name;
-          send({
-            type: 'tvos-keyboard',
-            value: el.value || '',
-            label:
-              el.getAttribute('aria-label') ||
-              el.placeholder ||
-              el.labels?.[0]?.textContent?.trim() ||
-              '',
-            secure: el.type === 'password',
-            email: el.type === 'email',
-            numeric:
-              el.inputMode === 'numeric' ||
-              el.inputMode === 'decimal' ||
-              el.type === 'number' ||
-              el.type === 'tel',
-            url: el.type === 'url' || el.inputMode === 'url',
-          });
+          openKeyboard(el);
           return;
         }
         // Left from the first poster of a grid's line: into the navigation, not up a line.
