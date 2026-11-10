@@ -402,6 +402,34 @@ final class SubtitleOverlay: UIView {
     private struct CueText {
         var front: NSAttributedString
         var back: NSAttributedString?
+        /// How far the outline reaches past the glyphs, and how opaque it is as a whole.
+        var outlineRadius: CGFloat = 0
+        var outlineAlpha: CGFloat = 1
+    }
+
+    /**
+     * The outline layer: the glyphs in the outline colour, drawn again at points around a circle of the
+     * outline's radius, so the outline is the glyphs grown by a disc. The text stroke UIKit offers has
+     * mitred corners, which on the sharp points of letters such as A, V, W, M and K stretch into black
+     * spikes ("horns"); libass joins its outlines round, and so does this. The label is larger than the
+     * text by the radius on every side, so nothing is cut off at the edges.
+     */
+    private final class OutlineLabel: UILabel {
+        var radius: CGFloat = 0
+
+        override func drawText(in rect: CGRect) {
+            guard radius > 0 else { return super.drawText(in: rect) }
+            // Where the front label draws its text: the label's frame less the margin the radius added,
+            // so both layers wrap at the same width and the glyphs line up.
+            let text = CGRect(x: radius, y: radius,
+                              width: max(0, bounds.width - 2 * radius), height: max(0, bounds.height - 2 * radius))
+            let steps = min(48, max(12, Int((2 * CGFloat.pi * radius).rounded(.up))))
+            for step in 0..<steps {
+                let angle = 2 * CGFloat.pi * CGFloat(step) / CGFloat(steps)
+                super.drawText(in: text.offsetBy(dx: cos(angle) * radius, dy: sin(angle) * radius))
+            }
+            super.drawText(in: text)
+        }
     }
 
     private func attributed(_ runs: [SubtitleRun]) -> CueText {
@@ -416,7 +444,8 @@ final class SubtitleOverlay: UIView {
         var shadow: NSShadow?
         if shadowSize > 0 {
             let made = NSShadow()
-            made.shadowColor = outlineColor
+            // With an outline the layer is drawn many times and made see-through as a whole (`outlineAlpha`).
+            made.shadowColor = outline > 0 ? outlineColor.withAlphaComponent(1) : outlineColor
             made.shadowOffset = CGSize(width: shadowSize, height: shadowSize)
             made.shadowBlurRadius = 0
             shadow = made
@@ -451,13 +480,11 @@ final class SubtitleOverlay: UIView {
             if run.underline && !forced { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
             if run.strike && !forced { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if outline > 0 {
-                // The outline layer: filled and stroked in the outline colour. A negative width
-                // fills and strokes; the stroke straddles the edge, so it's twice the outline.
-                // The shadow goes here, so it's cast by the outlined shape once.
+                // The outline layer: the glyphs in the outline colour, opaque; `OutlineLabel` draws
+                // them around a circle and the label carries the colour's own alpha.
+                // The shadow goes here, so it's cast by the outlined shape.
                 var outlined = attributes
-                outlined[.foregroundColor] = outlineColor
-                outlined[.strokeColor] = outlineColor
-                outlined[.strokeWidth] = -min(30, 2 * outline / size * 100)
+                outlined[.foregroundColor] = outlineColor.withAlphaComponent(1)
                 if let shadow { outlined[.shadow] = shadow }
                 back.append(NSAttributedString(string: run.text, attributes: outlined))
             } else if let shadow {
@@ -465,7 +492,9 @@ final class SubtitleOverlay: UIView {
             }
             text.append(NSAttributedString(string: run.text, attributes: attributes))
         }
-        return CueText(front: text, back: outline > 0 ? back : nil)
+        return CueText(
+            front: text, back: outline > 0 ? back : nil,
+            outlineRadius: outline, outlineAlpha: outlineColor.cgColor.alpha)
     }
 
     /**
@@ -489,17 +518,21 @@ final class SubtitleOverlay: UIView {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = column == 0 ? .left : column == 2 ? .right : .center
         paragraph.lineBreakMode = .byWordWrapping
-        func makeLabel(_ text: NSAttributedString) -> UILabel {
+        func makeLabel<L: UILabel>(_ text: NSAttributedString, as label: L) -> L {
             let aligned = NSMutableAttributedString(attributedString: text)
             aligned.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: aligned.length))
-            let label = UILabel()
             label.numberOfLines = 0
             label.attributedText = aligned
             return label
         }
         // Both layers hold the same glyphs in the same font, so they wrap and measure alike.
-        let label = makeLabel(text)
-        let outlineLabel = cue.back.map(makeLabel)
+        let label = makeLabel(text, as: UILabel())
+        let outlineLabel = cue.back.map { back -> OutlineLabel in
+            let outline = makeLabel(back, as: OutlineLabel())
+            outline.radius = cue.outlineRadius
+            outline.alpha = cue.outlineAlpha
+            return outline
+        }
         let maxWidth = rect.width - 2 * margin
         var size = label.sizeThatFits(CGSize(width: maxWidth, height: .greatestFiniteMagnitude))
         size.width = min(size.width, maxWidth)
@@ -540,7 +573,8 @@ final class SubtitleOverlay: UIView {
         box.frame = CGRect(origin: origin, size: boxSize)
         let labelFrame = CGRect(x: pad, y: pad / 2, width: size.width, height: size.height)
         if let outlineLabel {
-            outlineLabel.frame = labelFrame
+            // Larger than the text by the outline's reach, so the outline isn't cut at the edges.
+            outlineLabel.frame = labelFrame.insetBy(dx: -cue.outlineRadius, dy: -cue.outlineRadius)
             box.addSubview(outlineLabel)
         }
         label.frame = labelFrame
