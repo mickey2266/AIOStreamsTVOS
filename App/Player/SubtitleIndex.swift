@@ -4,9 +4,12 @@ import Foundation
  * When the file's own subtitle lines show, read from its index rather than played: the page's
  * `player-subtitle-index`, and every line of the track an added subtitle is lined up against at once.
  * AIOStreams' desktop and Android apps do the same with `subtitle_timelines` from AIOStreams/media
- * (`container/src/subtitles.rs`, rev 87dee2cc), which this follows for Matroska: muxers list every
- * subtitle frame in the Cues, most with its duration, so a few range requests give the whole file's
- * lines. A PGS track lists the display set that shows each line and the one that clears it.
+ * (`container/src/subtitles.rs`, rev 87dee2cc), which this follows for Matroska and for MP4 and MOV.
+ * Matroska: muxers list every subtitle frame in the Cues, most with its duration, so a few range
+ * requests give the whole file's lines; a PGS track lists the display set that shows each line and the
+ * one that clears it. MP4: the sample tables list every subtitle sample, and the gaps between lines
+ * as empty ones (text, WebVTT and 3GPP timed text; other formats come back with no lines).
+ * A fragmented MP4 has no such tables, and has no index.
  *
  * With every line from the start, the page's match sees the whole file, so it settles in a moment and
  * finds a subtitle timed for another frame rate, whose drift a few minutes of lines hide. The player's
@@ -14,13 +17,13 @@ import Foundation
  */
 enum SubtitleIndex {
     /// One of the file's subtitle tracks, in file order, and when its lines show, in milliseconds.
+    /// `codec` is Matroska's codec ID, or the MP4 sample entry's four letters (`tx3g`, `wvtt`).
     struct Timeline {
         let number: UInt64
         let codec: String
+        /// Pictures rather than text: Matroska's PGS, VobSub and DVB, MP4's `subp` tracks.
+        let isPicture: Bool
         let lines: [(start: Double, end: Double)]
-
-        /// Matroska's picture subtitles.
-        var isPicture: Bool { ["S_HDMV/PGS", "S_VOBSUB", "S_DVBSUB"].contains(codec) }
     }
 
     struct Failure: Error, CustomStringConvertible {
@@ -28,10 +31,18 @@ enum SubtitleIndex {
         init(_ description: String) { self.description = description }
     }
 
-    /// Every subtitle track of a Matroska file in file order; a track the index leaves out has no lines.
+    /// Every subtitle track of a Matroska or MP4 file in file order; a track the index leaves out has no lines.
     static func read(url: URL, headers: [String: String]) async throws -> [Timeline] {
         let reader = RangeReader(url: url, headers: headers)
-        let segment = try await Segment.open(reader)
+        let first = try await reader.read(0, Self.head)
+        if Array(first.prefix(4)) == [0x1A, 0x45, 0xDF, 0xA3] {
+            return try await matroska(reader, head: first)
+        }
+        return try await mp4Timelines(reader, head: first)
+    }
+
+    private static func matroska(_ reader: RangeReader, head: [UInt8]) async throws -> [Timeline] {
+        let segment = try await Segment.open(reader, head: head)
         let tracks = segment.tracks.filter { $0.type == TrackType.subtitle }
         guard !tracks.isEmpty else { return [] }
         let cues = try await segment.cues(reader)
@@ -44,6 +55,7 @@ enum SubtitleIndex {
             points = points.filter { seen.insert($0.start).inserted }
             let lines = track.codec == "S_HDMV/PGS" ? pgsLines(points) : timedLines(points)
             return Timeline(number: track.number, codec: track.codec,
+                            isPicture: ["S_HDMV/PGS", "S_VOBSUB", "S_DVBSUB"].contains(track.codec),
                             lines: lines.map { (start: Double($0.0), end: Double($0.1)) })
         }
     }
@@ -127,6 +139,137 @@ enum SubtitleIndex {
         return (0..<(n - 1)).filter { shows[$0] }.map { (t[$0], t[$0 + 1]) }
     }
 
+    // MARK: MP4
+
+    /// The `moov` box's body, before or after the media data. Boxes the first read covers cost no request.
+    private static func mp4Moov(_ r: RangeReader, head: [UInt8]) async throws -> MP4Bytes {
+        var pos: UInt64 = 0
+        while true {
+            let first: [UInt8]
+            if pos + 16 <= UInt64(head.count) {
+                first = Array(head[Int(pos)..<Int(pos) + 16])
+            } else {
+                first = try await r.read(pos, 16)
+            }
+            guard first.count >= 8 else { throw Failure("MP4 without moov") }
+            let box = MP4Bytes(first)
+            guard let size32 = box.u32(0) else { throw Failure("MP4 without moov") }
+            let kind = String(decoding: first[4..<8].map { $0 < 0x80 ? $0 : 0x3F }, as: UTF8.self)
+            var size = size32
+            if size32 == 1 {
+                guard let big = box.u64(8) else { throw Failure("box header") }
+                size = big
+            } else if size32 == 0 {
+                throw Failure("MP4 without moov")
+            }
+            if pos == 0, kind != "ftyp" { throw Failure("not Matroska or MP4") }
+            if kind == "moov" {
+                guard size <= UInt64(Int32.max) else { throw Failure("moov of \(size) bytes") }
+                let wholeBox: [UInt8]
+                if pos + size <= UInt64(head.count) {
+                    wholeBox = Array(head[Int(pos)..<Int(pos + size)])
+                } else {
+                    wholeBox = try await r.read(pos, Int(size))
+                }
+                guard UInt64(wholeBox.count) == size else { throw Failure("moov cut short") }
+                return MP4Bytes(Array(wholeBox.dropFirst(size32 == 1 ? 16 : 8)))
+            }
+            if kind == "moof" { throw Failure("fragmented MP4") }
+            pos += max(size, 8)
+        }
+    }
+
+    /// Every subtitle track of an MP4 or MOV file, in file order, with the lines its sample tables list.
+    private static func mp4Timelines(_ r: RangeReader, head: [UInt8]) async throws -> [Timeline] {
+        let moov = try await mp4Moov(r, head: head)
+        if moov.child("mvex") != nil { throw Failure("fragmented MP4") }
+        let movieScale: UInt64 = {
+            guard let mvhd = moov.child("mvhd"), let scale = mvhd.u32(mvhd[0] == 1 ? 20 : 12), scale > 0 else { return 1000 }
+            return scale
+        }()
+        let traks = moov.boxes().filter { $0.kind == "trak" }.map(\.body)
+        // Players list chapter titles as chapters, not subtitles.
+        var chapters = Set<UInt64>()
+        for trak in traks {
+            guard let tref = trak.child("tref") else { continue }
+            for (kind, ids) in tref.boxes() where kind == "chap" {
+                for i in 0..<(ids.count / 4) {
+                    if let id = ids.u32(4 * i) { chapters.insert(id) }
+                }
+            }
+        }
+        var out: [Timeline] = []
+        for trak in traks {
+            guard let mdia = trak.child("mdia"), let hdlr = mdia.child("hdlr") else { continue }
+            let handler = String(decoding: (8..<12).compactMap { hdlr[$0] }, as: UTF8.self)
+            guard ["sbtl", "text", "subt", "subp"].contains(handler) else { continue }
+            let number = trak.child("tkhd").flatMap { $0.u32($0[0] == 1 ? 20 : 12) } ?? 0
+            if chapters.contains(number) { continue }
+            let entry = mdia.path(["minf", "stbl", "stsd"])?.from(8)?.boxes().first?.kind
+            // An empty text sample is its two length bytes, an empty WebVTT one its 8-byte vtte box.
+            let empty: UInt64? = ["tx3g", "text"].contains(entry ?? "") ? 2 : entry == "wvtt" ? 8 : nil
+            let lines = empty.flatMap { sampleLines(trak: trak, mdia: mdia, movieScale: movieScale, empty: $0) } ?? []
+            out.append(Timeline(number: number, codec: entry ?? "", isPicture: handler == "subp",
+                                lines: lines.map { (start: Double($0.0), end: Double($0.1)) }))
+        }
+        return out
+    }
+
+    /// The samples that hold a line, from the sample tables, with an edit list's delay and start.
+    private static func sampleLines(trak: MP4Bytes, mdia: MP4Bytes, movieScale: UInt64,
+                                    empty: UInt64) -> [(UInt64, UInt64)]? {
+        guard let mdhd = mdia.child("mdhd"), let scale = mdhd.u32(mdhd[0] == 1 ? 20 : 12), scale > 0,
+              let stbl = mdia.path(["minf", "stbl"]),
+              let stsz = stbl.child("stsz"), let fixed = stsz.u32(4), let count = stsz.u32(8),
+              let stts = stbl.child("stts"), let runs = stts.u32(4) else { return nil }
+        func size(_ sample: UInt64) -> UInt64? {
+            fixed != 0 ? fixed : stsz.u32(12 + 4 * Int(sample))
+        }
+        // An edit list delays the track by its empty edits and starts it at its first edit's media time.
+        var delayMs: UInt64 = 0
+        var first: UInt64 = 0
+        if let elst = trak.path(["edts", "elst"]) {
+            let wide = elst[0] == 1
+            let width = wide ? 20 : 12
+            guard let edits = elst.u32(4) else { return nil }
+            for i in 0..<Int(edits) {
+                let at = 8 + width * i
+                let length: UInt64
+                let media: Int64
+                if wide {
+                    guard let l = elst.u64(at), let m = elst.u64(at + 8) else { return nil }
+                    length = l
+                    media = Int64(bitPattern: m)
+                } else {
+                    guard let l = elst.u32(at), let m = elst.u32(at + 4) else { return nil }
+                    length = l
+                    media = Int64(Int32(truncatingIfNeeded: m))
+                }
+                if media >= 0 {
+                    first = UInt64(media)
+                    break
+                }
+                delayMs += length * 1000 / movieScale
+            }
+        }
+        func ms(_ time: UInt64) -> UInt64 { delayMs + (time > first ? time - first : 0) * 1000 / scale }
+        var lines: [(UInt64, UInt64)] = []
+        var sample: UInt64 = 0
+        var dts: UInt64 = 0
+        for i in 0..<Int(runs) {
+            guard let run = stts.u32(8 + 8 * i), let delta = stts.u32(12 + 8 * i) else { return nil }
+            var left = run
+            while left > 0, sample < count {
+                guard let bytes = size(sample) else { return nil }
+                if bytes > empty, dts + delta > first { lines.append((ms(dts), ms(dts + delta))) }
+                dts += delta
+                sample += 1
+                left -= 1
+            }
+        }
+        return lines
+    }
+
     // MARK: Matroska
 
     private enum ID {
@@ -187,8 +330,7 @@ enum SubtitleIndex {
             UInt64((Double(ticks) * Double(scaleNs) / 1_000_000).rounded(.down))
         }
 
-        static func open(_ r: RangeReader) async throws -> Segment {
-            let head = try await r.read(0, SubtitleIndex.head)
+        static func open(_ r: RangeReader, head: [UInt8]) async throws -> Segment {
             guard let ebml = header(head, 0), ebml.id == ID.ebml, let ebmlSize = ebml.size else {
                 throw Failure("not Matroska")
             }
@@ -427,5 +569,78 @@ private final class RangeFetch: NSObject, URLSessionDataDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         finish(error.map { .failure($0) } ?? .success(data))
+    }
+}
+
+/**
+ * A stretch of an MP4's bytes that its boxes are read from without copying them: a box's body is the
+ * same array with a narrower range. Offsets are from the start of the stretch.
+ */
+private struct MP4Bytes {
+    let bytes: [UInt8]
+    let range: Range<Int>
+
+    init(_ bytes: [UInt8]) {
+        self.bytes = bytes
+        range = 0..<bytes.count
+    }
+
+    private init(_ bytes: [UInt8], _ range: Range<Int>) {
+        self.bytes = bytes
+        self.range = range
+    }
+
+    var count: Int { range.count }
+
+    subscript(index: Int) -> UInt8? {
+        index >= 0 && index < count ? bytes[range.lowerBound + index] : nil
+    }
+
+    func u16(_ i: Int) -> UInt64? { number(i, 2) }
+    func u32(_ i: Int) -> UInt64? { number(i, 4) }
+    func u64(_ i: Int) -> UInt64? { number(i, 8) }
+
+    private func number(_ i: Int, _ width: Int) -> UInt64? {
+        guard i >= 0, i + width <= count else { return nil }
+        let start = range.lowerBound + i
+        return (0..<width).reduce(UInt64(0)) { $0 << 8 | UInt64(bytes[start + $1]) }
+    }
+
+    /// The bytes from `i` on.
+    func from(_ i: Int) -> MP4Bytes? {
+        guard i >= 0, i <= count else { return nil }
+        return MP4Bytes(bytes, (range.lowerBound + i)..<range.upperBound)
+    }
+
+    /// Each box in the stretch, by its four-letter kind, in order.
+    func boxes() -> [(kind: String, body: MP4Bytes)] {
+        var out: [(kind: String, body: MP4Bytes)] = []
+        var i = 0
+        while i + 8 <= count, let size32 = u32(i) {
+            let start = range.lowerBound + i
+            let kind = String(decoding: bytes[(start + 4)..<(start + 8)].map { $0 < 0x80 ? $0 : 0x3F }, as: UTF8.self)
+            var head = 8
+            var size = size32
+            if size32 == 1 {
+                guard let big = u64(i + 8) else { break }
+                head = 16
+                size = big
+            } else if size32 == 0 {
+                size = UInt64(count - i)
+            }
+            guard size >= UInt64(head), size <= UInt64(count - i) else { break }
+            let end = i + Int(size)
+            out.append((kind, MP4Bytes(bytes, (start + head)..<(range.lowerBound + end))))
+            i = end
+        }
+        return out
+    }
+
+    func child(_ kind: String) -> MP4Bytes? {
+        boxes().first { $0.kind == kind }?.body
+    }
+
+    func path(_ kinds: [String]) -> MP4Bytes? {
+        kinds.reduce(self as MP4Bytes?) { $0?.child($1) }
     }
 }
