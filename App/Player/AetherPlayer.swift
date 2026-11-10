@@ -184,6 +184,9 @@ final class AetherPlayer {
         if !asLive && !onAVPlayer { title = nil }
         generation += 1
         let generation = generation
+        loadBegan = ProcessInfo.processInfo.systemUptime
+        audioReadyAt = nil
+        loadedAt = nil
         current = request
         queued = nil
         ended = false
@@ -215,6 +218,7 @@ final class AetherPlayer {
             async let checked: LiveHLS.Verdict? = checks ? LiveHLS.check(url, headers: request.headers) : nil
             await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
             guard let self, generation == self.generation else { return }
+            self.audioReadyAt = ProcessInfo.processInfo.systemUptime
             // Silent Dolby through the load, until the video's sound has started, so decoded
             // multichannel sound isn't downmixed into a stereo link (Continuous Audio Connection off).
             // A trailer goes without: it's a couple of minutes long and nearly always stereo.
@@ -241,6 +245,7 @@ final class AetherPlayer {
                     options: self.options(for: request, live: live)
                 )
                 guard generation == self.generation else { return }
+                self.loadedAt = ProcessInfo.processInfo.systemUptime
                 self.loaded(request)
             } catch is CancellationError {
                 // Another load took its place.
@@ -514,6 +519,7 @@ final class AetherPlayer {
 
     /// The video shows its first picture and plays: the page stops showing buffering.
     private func firstFrameShown() {
+        logStartTiming()
         // The HDMI link widens from its idle stereo once sound plays (Continuous Audio Connection off).
         AudioOutput.playbackStarted()
         // The video's own sound plays alongside the Dolby, then alone, then is paused and played if the
@@ -808,9 +814,41 @@ final class AetherPlayer {
         engine.prefetchLandings(atSeconds: skipEnds.map { $0 / 1000 })
     }
 
+    // MARK: Timing
+
+    /// When the current video's load began, its audio session was ready and the engine's load returned,
+    /// for `logStartTiming`; and when the last seek was asked, for the seek's own line.
+    private var loadBegan: TimeInterval?
+    private var audioReadyAt: TimeInterval?
+    private var loadedAt: TimeInterval?
+    private var seekBegan: TimeInterval?
+    private var seekTarget: Double = 0
+
+    /// One line for the first picture: where the start's time went. The engine's own `open timings` line
+    /// beside it splits the engine's load into connect, open and stream info.
+    private func logStartTiming() {
+        guard let began = loadBegan else { return }
+        loadBegan = nil
+        let now = ProcessInfo.processInfo.systemUptime
+        func ms(_ t: TimeInterval?) -> String { t.map { String(format: "%.0f", ($0 - began) * 1000) } ?? "-" }
+        EngineLogBook.note("[player] start timing (ms from the load): audio session ready \(ms(audioReadyAt)), "
+            + "engine loaded \(ms(loadedAt)), first picture \(ms(now))"
+            + (holdingForLink ? ", held for the link" : ""))
+    }
+
+    /// One line for a seek: from the page's ask to the engine saying it is playing again.
+    private func logSeekTiming() {
+        guard let began = seekBegan else { return }
+        seekBegan = nil
+        let took = (ProcessInfo.processInfo.systemUptime - began) * 1000
+        EngineLogBook.note(String(format: "[player] seek to %.1f s took %.0f ms", seekTarget, took))
+    }
+
     func seek(_ positionMs: Double) {
         guard current != nil else { return }
         let seconds = max(0, positionMs / 1000)
+        seekBegan = ProcessInfo.processInfo.systemUptime
+        seekTarget = seconds
         Task { [weak self] in await self?.engine.seek(to: seconds) }
     }
 
@@ -979,7 +1017,10 @@ final class AetherPlayer {
                 guard let self, self.current != nil, !self.ended else { return }
                 self.listener?.playerState(["seeking": seeking])
                 // mpv's playback-restart: playing again after a seek.
-                if !seeking { self.listener?.playerEvent("restart") }
+                if !seeking {
+                    self.logSeekTiming()
+                    self.listener?.playerEvent("restart")
+                }
             }
             .store(in: &watching)
         engine.$hasFirstFrameReadyForDisplay
