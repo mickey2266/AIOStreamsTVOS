@@ -828,7 +828,9 @@ final class AetherPlayer {
      * first preferred language, else the file's default track, else forced
      * ones in the audio's language; `always` falls back to any track; `smart`
      * shows only forced ones when the audio is already in a preferred language;
-     * `forced` only forced ones; `none` none.
+     * `forced` only a forced one in the audio's language or with no language,
+     * as mpv's `subs-fallback-forced`; `none` none. "Forced ones" above are
+     * always that kind: none in another language.
      */
     private func pickSubtitle(_ request: LoadRequest) {
         let tracks = engine.subtitleTracks.filter { !$0.isExternal }
@@ -852,7 +854,9 @@ final class AetherPlayer {
         case .none:
             pick = nil
         case .forced:
-            pick = forced ?? tracks.first { $0.isForced }
+            // mpv's `subs-fallback-forced`: a forced track in the audio's language or with none set, never
+            // one in another language, which would subtitle the film's foreign lines in a language not chosen.
+            pick = forced
         case .always:
             pick = preferred() ?? tracks.first { $0.isDefault } ?? tracks.first
         case .smart:
