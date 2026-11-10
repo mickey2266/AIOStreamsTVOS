@@ -279,6 +279,21 @@ enum EngineLogBook {
         return producerSlowAt.map { $0 >= date } ?? false
     }
 
+    /**
+     * The engine's subtitle reader and drain, kept apart from the audio and loading lines, which the
+     * memprobe and the spatial bridge's bed levels fill every 30 s: a pick that showed nothing for
+     * minutes said only what the app saw, not why. Its forward reader (`#151 forward prefetch`
+     * started, re-anchored, holding, yielded, failed), each drain outcome (`#357 subtitle-delivery`:
+     * packets found, cues, held), how far the track is read (`#250 subtitle-resolution`), and the pick.
+     */
+    private static let subtitleWords = ["#151 forward prefetch", "#357 subtitle-delivery", "#250 subtitle-resolution",
+                                        "packet-store drainer", "subtitle drain", "#416", "#100 ", "[subtitles]"]
+    private static var subtitles: [String] = []
+    private static let keptSubtitles = 30
+
+    /// Every 30 s, so they'd fill the audio lines on their own; they say nothing a stall needs.
+    private static let noiseWords = ["bed levels"]
+
     /// The engine calls the handler from its own threads, so this keeps no main-thread state.
     static func install() {
         EngineLog.handler = { line in
@@ -289,16 +304,37 @@ enum EngineLogBook {
                 producerSlowAt = Date()
                 lock.unlock()
             }
-            guard audioWords.contains(where: { lower.contains($0) })
-                || loadWords.contains(where: { lower.contains($0) }) else { return }
+            if subtitleWords.contains(where: { lower.contains($0) }) {
+                keepSubtitle(line)
+            } else if lower.contains("memprobe"), let tail = line.range(of: "subCues=") {
+                // The subtitle half of the memprobe (cues, the video reader's window and the forward
+                // reader's, `pref…` and `prefetch=`), which the 400 characters kept below cut off.
+                keepSubtitle("[AetherEngine] memprobe " + line[tail.lowerBound...])
+            }
+            guard !noiseWords.contains(where: { lower.contains($0) }),
+                  audioWords.contains(where: { lower.contains($0) })
+                    || loadWords.contains(where: { lower.contains($0) }) else { return }
             keep(line)
         }
     }
 
-    /// The app's own line, beside the engine's, for the app menu.
+    /// The app's own line, beside the engine's, for the app menu; its subtitle lines with the engine's.
     static func note(_ line: String) {
         NSLog("%@", line)
-        keep(line)
+        if line.hasPrefix("[subtitles]") { keepSubtitle(line) } else { keep(line) }
+    }
+
+    private static func keepSubtitle(_ line: String) {
+        lock.lock()
+        subtitles.append(String(line.prefix(500)))
+        if subtitles.count > keptSubtitles { subtitles.removeFirst(subtitles.count - keptSubtitles) }
+        lock.unlock()
+    }
+
+    static var recentSubtitles: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return subtitles
     }
 
     /// Stalls across videos, apart from the audio and loading lines so those can't push them out.

@@ -571,12 +571,11 @@ final class AetherPlayer {
         if let subtitle = change.subtitle {
             switch subtitle {
             case .track(let id):
-                if let index = Int(id) {
-                    selectSubtitleAfresh(index)
-                    checkPickedSubtitle(index)
-                }
+                if let index = Int(id) { pickSubtitleSettled(index) }
             case .off:
                 subtitlePickCheck?.cancel()
+                pendingSubtitlePick?.cancel()
+                pendingSubtitlePick = nil
                 engine.clearSubtitle()
             }
         }
@@ -584,18 +583,51 @@ final class AetherPlayer {
     }
 
     private var subtitlePickCheck: Task<Void, Never>?
+    private var pendingSubtitlePick: Task<Void, Never>?
     /// `selectSubtitleAfresh`'s clear and pick are under way, so the page isn't told of the clear.
     private var reselectingSubtitle = false
 
     /**
+     * A pick of the file's own subtitle, made once the picks stop coming. Every pick of an embedded
+     * track sends the engine's subtitle reader to the playhead, a request to the source each time,
+     * and restarting that reader (as the app did on every pick for a while) opens a new connection.
+     * A track went blank for about a minute only after many switches in a row, which fits the source
+     * refusing requests and the engine then pacing them: its subtitle reader holds while the origin
+     * is metered, and the pacing lifts after 60 s without a refusal (OriginRequestBudget, #377). So a
+     * run of picks less than `subtitlePickSettle` apart becomes one, the last, and it's a plain pick.
+     * The first of a run goes at once, so a single pick isn't delayed.
+     */
+    private func pickSubtitleSettled(_ index: Int) {
+        pendingSubtitlePick?.cancel()
+        let now = CACurrentMediaTime()
+        let quiet = now - lastSubtitlePickAt >= Self.subtitlePickSettle
+        lastSubtitlePickAt = now
+        guard !quiet else {
+            pendingSubtitlePick = nil
+            engine.selectSubtitleTrack(index: index)
+            return checkPickedSubtitle(index)
+        }
+        subtitlePickCheck?.cancel()
+        pendingSubtitlePick = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.subtitlePickSettle * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.current != nil, !self.ended else { return }
+            self.pendingSubtitlePick = nil
+            self.lastSubtitlePickAt = CACurrentMediaTime()
+            if self.engine.activeSubtitleTrackIndex != index { self.engine.selectSubtitleTrack(index: index) }
+            self.checkPickedSubtitle(index)
+        }
+    }
+
+    private var lastSubtitlePickAt: CFTimeInterval = 0
+    /// Picks closer together than this are one run, of which only the last is made.
+    private static let subtitlePickSettle: TimeInterval = 0.8
+
+    /**
      * A pick of the file's own subtitle, with the engine's reader for subtitle packets started again at
-     * the playhead. A plain pick of a track picked before (6, then 4, then 6) only asks the engine's
-     * running subtitle reader to move, which it does when its current read or link yield ends; a
-     * device report showed the track decoding nothing for about a minute after such a pick, and a
-     * seek to where the video is didn't help, as the engine's subtitle drain only reacts to a jump of
-     * more than 2.5 s. Clearing the subtitle first stops that reader (`#151 forward prefetch
-     * cancelled (reason=subtitlesCleared)`), so the pick builds a new one anchored at the playhead.
-     * The packets the engine already kept still decode at once, as before.
+     * the playhead, for a pick still missing its lines well after it was made: clearing the subtitle
+     * first stops that reader (`#151 forward prefetch cancelled (reason=subtitlesCleared)`), so the
+     * pick builds a new one anchored there. It opens a new connection to the source, so it's the last
+     * resort, once per pick (`pickedSubtitleReads`).
      */
     private func selectSubtitleAfresh(_ index: Int) {
         guard index < AetherEngine.externalSubtitleTrackIDBase, !engine.isLive,
@@ -612,9 +644,9 @@ final class AetherPlayer {
      * A subtitle of the file's own picked while it plays sometimes showed nothing. The engine decodes
      * a picked track from the packets it has kept of every subtitle stream, around the playhead; mpv,
      * in the desktop app, reads the stream again from the playhead on every pick instead (its
-     * "refresh" seek, the buffering you see there). Every pick here starts the engine's subtitle
-     * reader again at the playhead (`selectSubtitleAfresh`), and a pick still missing a line it should
-     * show starts it again. A seek to where the video is did nothing for the subtitles (Nov 9 report).
+     * "refresh" seek, the buffering you see there). Here a pick still missing a line it should show
+     * well after it was made starts the engine's subtitle reader again at the playhead, once
+     * (`selectSubtitleAfresh`). A seek to where the video is did nothing for the subtitles (Nov 9 report).
      *
      * With the file's subtitle index (`subtitleIndex()`, read once per file for the subtitle sync) the
      * app knows when the track's lines are, and watches the pick until one of them is on screen
@@ -684,7 +716,8 @@ final class AetherPlayer {
                                                          reads > 0 ? ", after starting its reader again \(reads)×" : ""))
                     }
                     missed += 1
-                    if missed >= 2 {
+                    // The plain pick's move to the playhead gets its own time first; a restart opens a connection.
+                    if missed >= 2, CACurrentMediaTime() - started >= Self.pickedSubtitleRestartAfter {
                         missed = 0
                         guard reads < Self.pickedSubtitleReads else {
                             return EngineLogBook.note(String(format: "[subtitles] %@ still not on screen at %.1f s after starting its reader again %d×; %d lines decoded",
@@ -728,11 +761,13 @@ final class AetherPlayer {
     private static let pickedSubtitleWatch: TimeInterval = 120
     /// How often they're looked at.
     private static let pickedSubtitleStep: TimeInterval = 0.5
-    /// Restarts of the subtitle reader for one pick, at most.
-    private static let pickedSubtitleReads = 2
+    /// Restarts of the subtitle reader for one pick, at most: each opens a connection to the source.
+    private static let pickedSubtitleReads = 1
     /// How long a restarted subtitle reader gets to open the file, find the playhead and read before
     /// the pick is looked at again (the engine's own budgets: 8 s each for its index read and its seek).
     private static let pickedSubtitleRestartWait: TimeInterval = 8
+    /// How long a pick's plain move gets before its reader is restarted.
+    private static let pickedSubtitleRestartAfter: TimeInterval = 6
 
     func seek(_ positionMs: Double) {
         guard current != nil else { return }

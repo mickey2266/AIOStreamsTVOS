@@ -251,6 +251,12 @@ enum AppAnswers {
             lines.append("Engine's audio and loading log, newest last:")
             lines += audio
         }
+        let subtitles = EngineLogBook.recentSubtitles
+        if !subtitles.isEmpty {
+            lines.append("")
+            lines.append("Subtitle log, newest last:")
+            lines += subtitles
+        }
         return lines
     }
 
