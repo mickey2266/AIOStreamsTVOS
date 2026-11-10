@@ -191,6 +191,16 @@ static NSString *AIOMimeType(NSString *extension) {
     [self.liveTasks addObject:task];
     NSString *rootPath = self.root.URLByStandardizingPath.path;
     NSURL *file = [self.root URLByAppendingPathComponent:[path substringFromIndex:1]].URLByStandardizingPath;
+    if ([path hasPrefix:@"/app-fonts/"]) {
+        // The app's own subtitle fonts (App/Fonts), for the page's @font-face (BridgeScript): tvOS has
+        // no casual or script face for its Casual and Cursive. Only a .ttf the app carries, by name.
+        NSString *name = path.lastPathComponent;
+        NSURL *font = [name.pathExtension.lowercaseString isEqualToString:@"ttf"]
+            ? [NSBundle.mainBundle URLForResource:name.stringByDeletingPathExtension withExtension:@"ttf"]
+            : nil;
+        file = font.URLByStandardizingPath;
+        rootPath = file.URLByDeletingLastPathComponent.path;
+    }
     __weak AIOWebKitDelegate *weakSelf = self;
     dispatch_async(self.fileQueue, ^{
         // Nothing outside the bundled build.

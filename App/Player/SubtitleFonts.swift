@@ -48,44 +48,62 @@ enum SubtitleFonts {
     private static let weightAxis = 0x7767_6874
     private static let variableBoldWeight = 700.0
 
-    /// The bundled files' descriptors, read once; a file missing from the build is left out.
-    private static let descriptors: [String: CTFontDescriptor] = {
-        var out: [String: CTFontDescriptor] = [:]
-        for file in Set(bundled.values.flatMap { [$0.regular, $0.bold, $0.italic, $0.boldItalic] }) {
-            guard let url = Bundle.main.url(forResource: file, withExtension: "ttf"),
-                  let found = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
-                  let first = found.first else {
-                NSLog("[subtitles] font %@.ttf isn't in the app", file)
+    /**
+     * The bundled files as Core Graphics fonts, read once; a file missing from the build or that won't
+     * read is left out, and said so in the app menu's subtitle log. Read from their bytes rather than
+     * by name, so nothing hangs on what PostScript names the files carry or on registering them.
+     */
+    private static let files: [String: CGFont] = {
+        var out: [String: CGFont] = [:]
+        var missing: [String] = []
+        for file in Set(bundled.values.flatMap { [$0.regular, $0.bold, $0.italic, $0.boldItalic] }).sorted() {
+            guard let url = Bundle.main.url(forResource: file, withExtension: "ttf")
+                    ?? Bundle.main.url(forResource: file, withExtension: "ttf", subdirectory: "Fonts"),
+                  let provider = CGDataProvider(url: url as CFURL),
+                  let font = CGFont(provider) else {
+                missing.append(file)
                 continue
             }
-            out[file] = first
+            out[file] = font
         }
+        EngineLogBook.note(missing.isEmpty
+            ? "[subtitles] the app's fonts read: \(out.keys.sorted().joined(separator: ", "))"
+            : "[subtitles] the app's fonts not in the build or unreadable: \(missing.joined(separator: ", "))")
         return out
     }()
+
+    /// Names already said in the log, so each is said once.
+    private static var told = Set<String>()
 
     static var names: Set<String> { Set(candidates.keys) }
 
     /// The font for the page's name at a size and style, or nil when neither the app nor the device has one.
+    @MainActor
     static func font(_ name: String?, size: CGFloat, bold: Bool, italic: Bool) -> UIFont? {
         guard let name else { return nil }
-        if let own = bundledFont(name, size: size, bold: bold, italic: italic) { return own }
-        guard let set = candidates[name] else { return nil }
-        let list = bold && italic ? set.boldItalic : bold ? set.bold : italic ? set.italic : set.regular
-        for postScript in list + set.regular {
-            if let font = UIFont(name: postScript, size: size) { return font }
+        var chosen = bundledFont(name, size: size, bold: bold, italic: italic)
+        if chosen == nil, let set = candidates[name] {
+            let list = bold && italic ? set.boldItalic : bold ? set.bold : italic ? set.italic : set.regular
+            chosen = (list + set.regular).lazy.compactMap { UIFont(name: $0, size: size) }.first
         }
-        return nil
+        if told.insert(name).inserted {
+            EngineLogBook.note("[subtitles] \(name) text drawn in \(chosen?.fontName ?? "the system font, none of its fonts here")")
+        }
+        return chosen
     }
 
     private static func bundledFont(_ name: String, size: CGFloat, bold: Bool, italic: Bool) -> UIFont? {
-        guard let files = bundled[name] else { return nil }
-        let file = bold && italic ? files.boldItalic : bold ? files.bold : italic ? files.italic : files.regular
-        guard var descriptor = descriptors[file] ?? descriptors[files.regular] else { return nil }
+        guard let names = bundled[name] else { return nil }
+        let file = bold && italic ? names.boldItalic : bold ? names.bold : italic ? names.italic : names.regular
+        let found = files[file].map { ($0, file) } ?? files[names.regular].map { ($0, names.regular) }
+        guard let (graphics, used) = found else { return nil }
         // The variable file has one face for every weight; bold is its weight axis set.
-        if bold, file == files.regular {
-            descriptor = CTFontDescriptorCreateCopyWithVariation(
-                descriptor, NSNumber(value: weightAxis) as CFNumber, CGFloat(variableBoldWeight))
+        var attributes: CTFontDescriptor?
+        if bold, used == names.regular, names.bold == names.regular {
+            attributes = CTFontDescriptorCreateWithAttributes([
+                kCTFontVariationAttribute as String: [NSNumber(value: weightAxis): NSNumber(value: variableBoldWeight)],
+            ] as CFDictionary)
         }
-        return CTFontCreateWithFontDescriptor(descriptor, size, nil) as UIFont
+        return CTFontCreateWithGraphicsFont(graphics, size, nil, attributes) as UIFont
     }
 }

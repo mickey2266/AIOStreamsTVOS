@@ -50,6 +50,30 @@ enum BridgeScript {
   } catch {}
 
   /*
+   * The page's Casual and Cursive subtitle fonts are CSS stacks of faces
+   * tvOS doesn't have ("Comic Sans MS", casual, sans-serif and "Segoe
+   * Script", "Snell Roundhand", cursive), so its previews drew both in the
+   * system's sans serif. The app carries Comic Neue and Dancing Script
+   * (App/Fonts, SIL Open Font License), served at /app-fonts/; they're
+   * declared here under the names first in each stack, which the page
+   * already asks for, so it needs no change of its own.
+   */
+  try {
+    const face = (family, file, weight, style) =>
+      `@font-face{font-family:"${family}";src:url("/app-fonts/${file}") format("truetype");` +
+      `font-weight:${weight};font-style:${style};font-display:swap}`;
+    const fonts = document.createElement('style');
+    fonts.textContent = [
+      face('Comic Sans MS', 'ComicNeue-Regular.ttf', '100 600', 'normal'),
+      face('Comic Sans MS', 'ComicNeue-Bold.ttf', '700 900', 'normal'),
+      face('Comic Sans MS', 'ComicNeue-Italic.ttf', '100 600', 'italic'),
+      face('Comic Sans MS', 'ComicNeue-BoldItalic.ttf', '700 900', 'italic'),
+      face('Segoe Script', 'DancingScript.ttf', '400 700', 'normal'),
+    ].join('');
+    (document.head || document.documentElement).appendChild(fonts);
+  } catch {}
+
+  /*
    * On a TV the page eases keyed scrolling by sliding the page, or a row of
    * cards, in nested layers (`data-glide-layer`), one animation per key
    * press. A held key repeats about nine times a second, so scrolling fast
