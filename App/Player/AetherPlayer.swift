@@ -85,6 +85,9 @@ final class AetherPlayer {
      */
     private var liveOnAVPlayer = false
 
+    /// Where the page's skips end, in ms (`setSkips`).
+    private var skipEnds: [Double] = []
+
     /// A URL for the log: its host and the end of its path, without the query, where tokens go.
     static func shortened(_ url: URL) -> String {
         let path = url.path.split(separator: "/").suffix(2).joined(separator: "/")
@@ -141,10 +144,29 @@ final class AetherPlayer {
         // mpv's `append`: after the file playing, which the page only asks of a player in its own window.
         if request.append, current != nil, !ended {
             queued = request
+            warm(request)
             return
         }
         start(request)
     }
+
+    /// The queued video's first bytes (and the index at its end, where the file keeps it), fetched while
+    /// the current one plays, so its load starts from them rather than asking for them. The engine adopts
+    /// them only for this exact address and these headers; one it declines costs nothing but the fetch.
+    private func warm(_ request: LoadRequest) {
+        guard !request.live, !request.isTrailer, PlayerProtocol.isWebURL(request.url),
+              let url = URL(string: request.url) else { return }
+        let headers = request.headers
+        let name = Self.shortened(url)
+        warming?.cancel()
+        warming = Task.detached(priority: .utility) {
+            let report = await AetherEngine.prewarm(url: url, httpHeaders: headers)
+            EngineLogBook.note("[player] warmed the queued video \(name): \(report)")
+        }
+    }
+
+    /// The warm of the queued video, replaced when another is queued.
+    private var warming: Task<Void, Never>?
 
     /// `asLive`: loaded again as live after AVPlayer gave up on it as a finished video (`failed`).
     /// `onAVPlayer`: a live channel loaded again on AVPlayer, its audio unidentified on the engine's reader (`loaded`).
@@ -167,6 +189,8 @@ final class AetherPlayer {
         ended = false
         addedSubtitles = [:]
         lastBuffered = nil
+        // The page sends the next file's skips once it has loaded it.
+        skipEnds = []
         // The page asks again for the next file's reference track.
         endLineWatch()
         health = PlaybackHealth()
@@ -365,6 +389,7 @@ final class AetherPlayer {
         pickSubtitle(request)
         reportTracks()
         reportChapters()
+        applySkipLandings()
         if engine.duration > 0 { listener?.playerState(["durationMs": engine.duration * 1000]) }
         listener?.playerEvent("loaded")
         if holdingForLink { holdForLink() }
@@ -768,6 +793,20 @@ final class AetherPlayer {
     private static let pickedSubtitleRestartWait: TimeInterval = 8
     /// How long a pick's plain move gets before its reader is restarted.
     private static let pickedSubtitleRestartAfter: TimeInterval = 6
+
+    /// Where the page's skips end (intro, recap, credits), in ms. The engine fetches the bytes each
+    /// lands on ahead of the skip while the link has room, as the Android app's player does, so the
+    /// skip doesn't wait on a new request. Sent again for every video, and held until the video is
+    /// loaded.
+    func setSkips(endsMs: [Double]) {
+        skipEnds = endsMs
+        applySkipLandings()
+    }
+
+    private func applySkipLandings() {
+        guard current != nil, !ended, !engine.isLive else { return }
+        engine.prefetchLandings(atSeconds: skipEnds.map { $0 / 1000 })
+    }
 
     func seek(_ positionMs: Double) {
         guard current != nil else { return }

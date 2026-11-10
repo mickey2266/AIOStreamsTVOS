@@ -160,7 +160,16 @@ final class PlayerChannel: PlayerListener {
                     guard let track else { return }
                     self?.send(["type": "player-subtitle-lines", "track": track, "lines": lines])
                 }
-            case "player-stats-overlay", "player-skips",
+            // The stretches the page offers to skip or skips itself; the player holds the bytes each ends on.
+            case "player-skips":
+                let segments = message["segments"] as? [Any] ?? []
+                player.setSkips(endsMs: segments.compactMap { (segment: Any) -> Double? in
+                    guard let range = segment as? Message,
+                          let start = range.number("startMs"), let end = range.number("endMs"),
+                          end > start else { return nil }
+                    return end
+                })
+            case "player-stats-overlay",
                  "player-controls", "player-retry", "player-unqueue":
                 break
             default:

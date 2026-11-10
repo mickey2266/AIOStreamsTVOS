@@ -22,6 +22,10 @@ import PackageDescription
  * - 82a544ea (47c4e653): the silent Atmos stream the engine plays beside a rendered
  *   TrueHD Atmos or DTS:X bed stops while the picture-in-picture window
  *   shows, as the bed played nothing in the window beside it.
+ * - 4ba8019c: a forward seek past the read-ahead is read through the live
+ *   connection up to what the link delivers in a new request's first-byte time
+ *   (8 to 32 MB, was a fixed 8 MB); `prefetchLandings(atSeconds:)`, which holds
+ *   the bytes a skip lands on ahead of the skip, from the page's skip segments.
  * Back to an upstream version once those are released there.
  *
  * TrueHD Atmos and DTS:X object rendering (`TrueHDObjectAudio`,
@@ -38,7 +42,7 @@ let package = Package(
         .library(name: "AetherHost", targets: ["AetherHost"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "82a544eae2e9481679d04f52a311a06e379a94d3",
+        .package(url: "https://github.com/mickey2266/AetherEngine", revision: "4ba8019c5b947440c9bb7eca819fd20d30c34671",
                  traits: ["TrueHDObjectAudio", "DTSXObjectAudio"]),
     ],
     targets: [
