@@ -572,7 +572,7 @@ final class AetherPlayer {
             switch subtitle {
             case .track(let id):
                 if let index = Int(id) {
-                    engine.selectSubtitleTrack(index: index)
+                    selectSubtitleAfresh(index)
                     checkPickedSubtitle(index)
                 }
             case .off:
@@ -584,13 +584,37 @@ final class AetherPlayer {
     }
 
     private var subtitlePickCheck: Task<Void, Never>?
+    /// `selectSubtitleAfresh`'s clear and pick are under way, so the page isn't told of the clear.
+    private var reselectingSubtitle = false
+
+    /**
+     * A pick of the file's own subtitle, with the engine's reader for subtitle packets started again at
+     * the playhead. A plain pick of a track picked before (6, then 4, then 6) only asks the engine's
+     * running subtitle reader to move, which it does when its current read or link yield ends; a
+     * device report showed the track decoding nothing for about a minute after such a pick, and a
+     * seek to where the video is didn't help, as the engine's subtitle drain only reacts to a jump of
+     * more than 2.5 s. Clearing the subtitle first stops that reader (`#151 forward prefetch
+     * cancelled (reason=subtitlesCleared)`), so the pick builds a new one anchored at the playhead.
+     * The packets the engine already kept still decode at once, as before.
+     */
+    private func selectSubtitleAfresh(_ index: Int) {
+        guard index < AetherEngine.externalSubtitleTrackIDBase, !engine.isLive,
+              engine.activeSubtitleTrackIndex != nil else {
+            return engine.selectSubtitleTrack(index: index)
+        }
+        reselectingSubtitle = true
+        engine.clearSubtitle()
+        engine.selectSubtitleTrack(index: index)
+        reselectingSubtitle = false
+    }
 
     /**
      * A subtitle of the file's own picked while it plays sometimes showed nothing. The engine decodes
      * a picked track from the packets it has kept of every subtitle stream, around the playhead; mpv,
      * in the desktop app, reads the stream again from the playhead on every pick instead (its
-     * "refresh" seek, the buffering you see there). Here that read happens only when the pick is
-     * missing a line it should show: a seek to where the video is.
+     * "refresh" seek, the buffering you see there). Every pick here starts the engine's subtitle
+     * reader again at the playhead (`selectSubtitleAfresh`), and a pick still missing a line it should
+     * show starts it again. A seek to where the video is did nothing for the subtitles (Nov 9 report).
      *
      * With the file's subtitle index (`subtitleIndex()`, read once per file for the subtitle sync) the
      * app knows when the track's lines are, and watches the pick until one of them is on screen
@@ -622,15 +646,15 @@ final class AetherPlayer {
                 guard lines == 0 else {
                     return EngineLogBook.note("[subtitles] \(name) picked: \(lines) lines decoded around the playhead")
                 }
-                EngineLogBook.note(String(format: "[subtitles] %@ picked: no line decoded in %.0f s and no index; reading the stream again",
+                EngineLogBook.note(String(format: "[subtitles] %@ picked: no line decoded in %.0f s and no index; starting its reader again at the playhead",
                                           name, Self.pickedSubtitleWait))
             }
-            await self.engine.seek(to: self.engine.clock.currentTime)
-            try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleWait * 1_000_000_000))
+            self.selectSubtitleAfresh(index)
+            try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleRestartWait * 1_000_000_000))
             guard self.pickStillCurrent(index, generation) else { return }
             let at = self.engine.sourceTime
             let shown = self.engine.subtitleCues.contains { $0.startTime <= at && $0.endTime > at }
-            EngineLogBook.note("[subtitles] \(name) after reading again: \(self.engine.subtitleCues.count) lines decoded, "
+            EngineLogBook.note("[subtitles] \(name) after starting its reader again: \(self.engine.subtitleCues.count) lines decoded, "
                 + (shown ? "one on screen" : "none on screen"))
         }
     }
@@ -639,8 +663,8 @@ final class AetherPlayer {
      * A pick's lines checked against the file's index as it plays, until one of them is on screen as the
      * index has it or `pickedSubtitleWatch` has passed: a switch that showed nothing for a minute had
      * lines due all along, so a look at the moment of the pick alone could miss it. Each line the engine
-     * hasn't decoded `pickedSubtitleDue` into it, twice running, reads the stream again from where the
-     * video is, at most `pickedSubtitleReads` times.
+     * hasn't decoded `pickedSubtitleDue` into it, twice running, starts the track's reader again at the
+     * playhead, at most `pickedSubtitleReads` times.
      */
     private func watchPickedSubtitle(_ index: Int, generation: Int, name: String,
                                      lines: [(start: Double, end: Double)]) async {
@@ -657,21 +681,21 @@ final class AetherPlayer {
                     if decoded.contains(where: { $0.startTime <= now && $0.endTime > now }) {
                         return EngineLogBook.note(String(format: "[subtitles] %@ on screen at %.1f s, the file's line from %.1f s%@",
                                                          name, now, due.start / 1000,
-                                                         reads > 0 ? ", after reading again \(reads)×" : ""))
+                                                         reads > 0 ? ", after starting its reader again \(reads)×" : ""))
                     }
                     missed += 1
                     if missed >= 2 {
                         missed = 0
                         guard reads < Self.pickedSubtitleReads else {
-                            return EngineLogBook.note(String(format: "[subtitles] %@ still not on screen at %.1f s after reading again %d×; %d lines decoded",
+                            return EngineLogBook.note(String(format: "[subtitles] %@ still not on screen at %.1f s after starting its reader again %d×; %d lines decoded",
                                                              name, now, reads, decoded.count))
                         }
                         reads += 1
-                        EngineLogBook.note(String(format: "[subtitles] %@: the file's line from %.1f s to %.1f s isn't decoded at %.1f s (%d lines are); reading the stream again",
+                        EngineLogBook.note(String(format: "[subtitles] %@: the file's line from %.1f s to %.1f s isn't decoded at %.1f s (%d lines are); starting its reader again at the playhead",
                                                   name, due.start / 1000, due.end / 1000, now, decoded.count))
-                        await engine.seek(to: engine.clock.currentTime)
-                        // The read's own lines take a moment to decode.
-                        try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleWait * 1_000_000_000))
+                        selectSubtitleAfresh(index)
+                        // A new reader opens the file, finds its place and reads: seconds, not a tick.
+                        try? await Task.sleep(nanoseconds: UInt64(Self.pickedSubtitleRestartWait * 1_000_000_000))
                         continue
                     }
                 } else {
@@ -704,8 +728,11 @@ final class AetherPlayer {
     private static let pickedSubtitleWatch: TimeInterval = 120
     /// How often they're looked at.
     private static let pickedSubtitleStep: TimeInterval = 0.5
-    /// Reads of the stream again for one pick, at most.
+    /// Restarts of the subtitle reader for one pick, at most.
     private static let pickedSubtitleReads = 2
+    /// How long a restarted subtitle reader gets to open the file, find the playhead and read before
+    /// the pick is looked at again (the engine's own budgets: 8 s each for its index read and its seek).
+    private static let pickedSubtitleRestartWait: TimeInterval = 8
 
     func seek(_ positionMs: Double) {
         guard current != nil else { return }
@@ -929,7 +956,7 @@ final class AetherPlayer {
         engine.$activeSubtitleTrackIndex
             .removeDuplicates()
             .sink { [weak self] index in
-                guard let self, self.current != nil else { return }
+                guard let self, self.current != nil, !self.reselectingSubtitle else { return }
                 self.listener?.playerState(["subtitle": nullable(index.map(String.init))])
             }
             .store(in: &watching)
