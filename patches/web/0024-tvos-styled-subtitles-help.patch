@@ -1,16 +1,16 @@
-diff --git a/packages/web/src/pages/settings/subtitles.tsx b/packages/web/src/pages/settings/subtitles.tsx
-index af658b0c..5c4ea1e5 100644
---- a/packages/web/src/pages/settings/subtitles.tsx
-+++ b/packages/web/src/pages/settings/subtitles.tsx
+diff --git a/packages/web/src/app/settings/subtitles.tsx b/packages/web/src/app/settings/subtitles.tsx
+index 968337d5..87e24472 100644
+--- a/packages/web/src/app/settings/subtitles.tsx
++++ b/packages/web/src/app/settings/subtitles.tsx
 @@ -26,6 +26,7 @@ import {
- } from '../../lib/settings';
+ } from '@/lib/settings';
  import { ColorInput } from '@aiostreams/ui/color-input';
- import { currentHost } from '../../lib/hosts';
-+import { appleTv } from '../../lib/hosts/shell/bridge';
- import { SettingsCard } from '../../components/settings-card';
- import { languageOptions, LanguageList, followsYou, onAccount } from './common';
- 
-@@ -67,6 +68,14 @@ const fontOptions = (): { value: SubtitleFont; label: string }[] => [
+ import { currentHost } from '@/lib/hosts';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import { SettingsCard } from './_components/settings-card';
+ import {
+   languageOptions,
+@@ -72,6 +73,14 @@ const fontOptions = (): { value: SubtitleFont; label: string }[] => [
    { value: 'cursive', label: t`Cursive` },
  ];
  
@@ -25,7 +25,7 @@ index af658b0c..5c4ea1e5 100644
  const subtitleTypeOptions = (): { value: SubtitleType; label: string }[] => [
    { value: 'normal', label: t`Full` },
    { value: 'sdh', label: t`SDH, with sounds described` },
-@@ -248,7 +257,11 @@ export function SubtitlesSection() {
+@@ -253,7 +262,11 @@ export function SubtitlesSection() {
          <Switch
            side="right"
            label={t`Apply to styled subtitles too`}

@@ -1,3 +1,80 @@
+diff --git a/packages/web/src/app/home/page.tsx b/packages/web/src/app/home/page.tsx
+index dc759a05..a6a7dc59 100644
+--- a/packages/web/src/app/home/page.tsx
++++ b/packages/web/src/app/home/page.tsx
+@@ -40,6 +40,7 @@ import { href, itemPath, navigate, to, versionsPath } from '@/lib/paths';
+ import { settings, useSetting, type FeaturedSource } from '@/lib/settings';
+ import { useFeature } from '@/lib/jellyfin/server-info';
+ import { useNear } from '@/hooks/use-in-view';
++import { whenStill } from '@/lib/input/glide';
+ import { FollowHero, Hero } from '@/components/media/hero';
+ import { CardPreviewHost } from '@/components/media/card-preview';
+ import { MediaRow } from '@/components/media/media-row';
+@@ -335,6 +336,24 @@ function UpcomingRow() {
+ 
+ const ROW_PAGE = 20;
+ 
++/** How far below the screen a TV starts a library row: a screen's height. */
++// eslint-disable-next-line lingui/no-unlocalized-strings -- a root margin
++const TV_ROW_AHEAD = '100% 0px';
++
++/**
++ * `value`, changed only while the page isn't scrolling: a TV eases its
++ * scroll frame by frame, and a row's twenty cards mounting at once stall a
++ * frame or more of it (AIOStreamsTVOS).
++ */
++function useStill<T>(value: T): T {
++  const [shown, setShown] = React.useState(value);
++  React.useEffect(() => {
++    if (Object.is(shown, value)) return;
++    return whenStill(() => setShown(() => value));
++  }, [value, shown]);
++  return shown;
++}
++
+ /** Favourite channels, then those played here lately, with what is on. */
+ function LiveRow() {
+   const view = useLiveTvView();
+@@ -391,17 +410,23 @@ function LiveRow() {
+  */
+ function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
+   const { client } = useSession();
+-  const [ref, near] = useNear<HTMLElement>('400px', first);
++  // A TV starts a row a screen ahead, so it's drawn between presses rather than as it scrolls in.
++  const [ref, nearNow] = useNear<HTMLElement>(
++    currentHost().tv ? TV_ROW_AHEAD : '400px',
++    first
++  );
++  const near = useStill(nearNow);
+   const pages = useItemPages(view.Id!, {
+     types: libraryTypes(view),
+     recursive: true,
+     pageSize: ROW_PAGE,
+     enabled: near,
+   });
+-  const items = React.useMemo(
++  const fetched = React.useMemo(
+     () => pages.data?.pages.flatMap((p) => p.Items ?? []) ?? [],
+     [pages.data]
+   );
++  const items = useStill(fetched);
+   const landscape =
+     items.length > 0 &&
+     items.filter((i) => cardShape(i) === 'landscape').length > items.length / 2;
+@@ -459,7 +484,12 @@ function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
+         </Anchor>
+       }
+       shape={landscape ? 'wide' : 'poster'}
+-      loading={!near || (!pages.data && !pages.isError)}
++      loading={
++        !near ||
++        (!pages.data && !pages.isError) ||
++        // Fetched, its cards waiting for a scroll to end.
++        (!items.length && fetched.length > 0)
++      }
+       waiting={!near}
+       loadingMore={isFetchingNextPage}
+       onEndReached={more}
 diff --git a/packages/web/src/lib/input/glide.ts b/packages/web/src/lib/input/glide.ts
 index 5ac94525..6acd8680 100644
 --- a/packages/web/src/lib/input/glide.ts
@@ -53,80 +130,3 @@ index 5ac94525..6acd8680 100644
    if (glides.size) frame = requestAnimationFrame(step);
 +  else wakeStill();
  }
-diff --git a/packages/web/src/pages/home.tsx b/packages/web/src/pages/home.tsx
-index f9edd54b..3c42229a 100644
---- a/packages/web/src/pages/home.tsx
-+++ b/packages/web/src/pages/home.tsx
-@@ -41,6 +41,7 @@ import { href, itemPath, navigate, to, versionsPath } from '../lib/paths';
- import { settings, useSetting, type FeaturedSource } from '../lib/settings';
- import { useFeature } from '../lib/server-info';
- import { useNear } from '../lib/use-in-view';
-+import { whenStill } from '../lib/input/glide';
- import { FollowHero, Hero } from '../components/hero';
- import { CardPreviewHost } from '../components/card-preview';
- import { MediaRow } from '../components/media-row';
-@@ -336,6 +337,24 @@ function UpcomingRow() {
- 
- const ROW_PAGE = 20;
- 
-+/** How far below the screen a TV starts a library row: a screen's height. */
-+// eslint-disable-next-line lingui/no-unlocalized-strings -- a root margin
-+const TV_ROW_AHEAD = '100% 0px';
-+
-+/**
-+ * `value`, changed only while the page isn't scrolling: a TV eases its
-+ * scroll frame by frame, and a row's twenty cards mounting at once stall a
-+ * frame or more of it (AIOStreamsTVOS).
-+ */
-+function useStill<T>(value: T): T {
-+  const [shown, setShown] = React.useState(value);
-+  React.useEffect(() => {
-+    if (Object.is(shown, value)) return;
-+    return whenStill(() => setShown(() => value));
-+  }, [value, shown]);
-+  return shown;
-+}
-+
- /** Favourite channels, then those played here lately, with what is on. */
- function LiveRow() {
-   const view = useLiveTvView();
-@@ -392,17 +411,23 @@ function LiveRow() {
-  */
- function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
-   const { client } = useSession();
--  const [ref, near] = useNear<HTMLElement>('400px', first);
-+  // A TV starts a row a screen ahead, so it's drawn between presses rather than as it scrolls in.
-+  const [ref, nearNow] = useNear<HTMLElement>(
-+    currentHost().tv ? TV_ROW_AHEAD : '400px',
-+    first
-+  );
-+  const near = useStill(nearNow);
-   const pages = useItemPages(view.Id!, {
-     types: libraryTypes(view),
-     recursive: true,
-     pageSize: ROW_PAGE,
-     enabled: near,
-   });
--  const items = React.useMemo(
-+  const fetched = React.useMemo(
-     () => pages.data?.pages.flatMap((p) => p.Items ?? []) ?? [],
-     [pages.data]
-   );
-+  const items = useStill(fetched);
-   const landscape =
-     items.length > 0 &&
-     items.filter((i) => cardShape(i) === 'landscape').length > items.length / 2;
-@@ -460,7 +485,12 @@ function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
-         </Anchor>
-       }
-       shape={landscape ? 'wide' : 'poster'}
--      loading={!near || (!pages.data && !pages.isError)}
-+      loading={
-+        !near ||
-+        (!pages.data && !pages.isError) ||
-+        // Fetched, its cards waiting for a scroll to end.
-+        (!items.length && fetched.length > 0)
-+      }
-       waiting={!near}
-       loadingMore={isFetchingNextPage}
-       onEndReached={more}

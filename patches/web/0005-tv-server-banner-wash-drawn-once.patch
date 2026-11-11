@@ -1,15 +1,15 @@
-diff --git a/packages/web/src/pages/servers.tsx b/packages/web/src/pages/servers.tsx
-index 3da63e1c..c1cfb937 100644
---- a/packages/web/src/pages/servers.tsx
-+++ b/packages/web/src/pages/servers.tsx
+diff --git a/packages/web/src/app/servers/page.tsx b/packages/web/src/app/servers/page.tsx
+index c32daf9c..9e27e2ac 100644
+--- a/packages/web/src/app/servers/page.tsx
++++ b/packages/web/src/app/servers/page.tsx
 @@ -25,6 +25,7 @@ import {
    ConfirmationDialog,
    useConfirmationDialog,
  } from '@aiostreams/ui/shared/confirmation-dialog';
-+import { DrawnWash } from '../components/drawn-wash';
- import { UserAvatar } from '../components/user-avatar';
- import { JellyfinClient } from '../lib/client';
- import { currentHost } from '../lib/hosts';
++import { DrawnWash } from '@/components/drawn-wash';
+ import { UserAvatar } from '@/components/user-avatar';
+ import { JellyfinClient } from '@/lib/jellyfin/client';
+ import { currentHost } from '@/lib/hosts';
 @@ -193,11 +194,19 @@ function Banner({ name, logo }: { name: string; logo: string | null }) {
      <span className="relative flex h-28 w-full flex-none items-center justify-center overflow-hidden bg-white/[0.03]">
        {shown ? (

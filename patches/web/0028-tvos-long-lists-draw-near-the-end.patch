@@ -1,14 +1,14 @@
-diff --git a/packages/web/src/components/episodes.tsx b/packages/web/src/components/episodes.tsx
-index f66337fd..f42810e0 100644
---- a/packages/web/src/components/episodes.tsx
-+++ b/packages/web/src/components/episodes.tsx
-@@ -34,6 +34,7 @@ import { useVersionPicker } from './version-picker';
- import { DownloadButton } from './download-button';
- import { useDownloadOf } from '../lib/downloads';
- import { useHold } from '../lib/use-hold';
-+import { useInView } from '../lib/use-in-view';
+diff --git a/packages/web/src/components/media/episodes.tsx b/packages/web/src/components/media/episodes.tsx
+index 4c510ce4..95f6976a 100644
+--- a/packages/web/src/components/media/episodes.tsx
++++ b/packages/web/src/components/media/episodes.tsx
+@@ -34,6 +34,7 @@ import { useVersionPicker } from '@/features/versions/version-picker';
+ import { DownloadButton } from '@/features/downloads/download-button';
+ import { useDownloadOf } from '@/lib/downloads';
+ import { useHold } from '@/hooks/use-hold';
++import { useInView } from '@/hooks/use-in-view';
  import { fadeIn } from './media-row';
- import type { BaseItemDto } from '../lib/types';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
  
 @@ -521,6 +522,21 @@ export function EpisodeList({
    /** Side by side on wide screens. */
@@ -59,18 +59,18 @@ index f66337fd..f42810e0 100644
  export function EpisodeListSkeleton({ columns }: { columns?: boolean }) {
    return (
      <div
-diff --git a/packages/web/src/components/mixed-grid.tsx b/packages/web/src/components/mixed-grid.tsx
-index 2b1a4ff7..849779a4 100644
---- a/packages/web/src/components/mixed-grid.tsx
-+++ b/packages/web/src/components/mixed-grid.tsx
+diff --git a/packages/web/src/components/media/mixed-grid.tsx b/packages/web/src/components/media/mixed-grid.tsx
+index f987d692..68bc9017 100644
+--- a/packages/web/src/components/media/mixed-grid.tsx
++++ b/packages/web/src/components/media/mixed-grid.tsx
 @@ -3,6 +3,7 @@ import { Skeleton } from '@aiostreams/ui/skeleton';
- import type { JellyfinClient } from '../lib/client';
- import { cardImages, cardShape, animatedPosterOf } from '../lib/images';
- import { itemSubtitle, progressOf } from '../lib/format';
-+import { currentHost } from '../lib/hosts';
- import { href, itemPath } from '../lib/paths';
- import { ScrollRoot, watch } from '../lib/use-in-view';
- import type { BaseItemDto } from '../lib/types';
+ import type { JellyfinClient } from '@/lib/jellyfin/client';
+ import { cardImages, cardShape, animatedPosterOf } from '@/lib/artwork/urls';
+ import { itemSubtitle, progressOf } from '@/lib/format';
++import { currentHost } from '@/lib/hosts';
+ import { href, itemPath } from '@/lib/paths';
+ import { ScrollRoot, watch } from '@/hooks/use-in-view';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
 @@ -17,7 +18,7 @@ import { CardGrid, fadeIn } from './media-row';
   * by half a row, so one screen still mounts a row long before it's in sight.
   */

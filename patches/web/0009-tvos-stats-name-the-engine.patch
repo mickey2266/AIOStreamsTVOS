@@ -1,13 +1,16 @@
-diff --git a/packages/web/src/lib/hosts/shell/player.ts b/packages/web/src/lib/hosts/shell/player.ts
---- a/packages/web/src/lib/hosts/shell/player.ts
-+++ b/packages/web/src/lib/hosts/shell/player.ts
-@@ -113,7 +113,8 @@ function exoStatsText(
+diff --git a/packages/web/src/lib/hosts/shell/exo-stats.ts b/packages/web/src/lib/hosts/shell/exo-stats.ts
+index 8731ecfd..1ec460ce 100644
+--- a/packages/web/src/lib/hosts/shell/exo-stats.ts
++++ b/packages/web/src/lib/hosts/shell/exo-stats.ts
+@@ -73,7 +73,10 @@ function exoStatsRows(
    const codec = (mime?: string) => (mime && (CODECS[mime] ?? mime)) || '?';
    const rate = (bits?: number) =>
      bits && bits > 0 ? ` · ${(bits / 1e6).toFixed(1)} Mbps` : '';
--  const lines = ['Engine     ExoPlayer'];
+-  const rows: StatsRow[] = [{ label: 'Engine', value: 'ExoPlayer' }];
 +  // The Apple TV app sends these numbers too, from its own engine, and names it.
-+  const lines = [`Engine     ${str('engine') ?? 'ExoPlayer'}`];
++  const rows: StatsRow[] = [
++    { label: 'Engine', value: str('engine') ?? 'ExoPlayer' },
++  ];
    if (str('videoMime')) {
      const fps = num('frameRate');
      // A Dolby Vision track played as its base layer comes out as plain HEVC.

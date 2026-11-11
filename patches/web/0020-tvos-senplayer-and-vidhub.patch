@@ -1,7 +1,9 @@
 diff --git a/packages/web/src/lib/playback/player-choice.ts b/packages/web/src/lib/playback/player-choice.ts
+index f6720c73..6c6d197e 100644
 --- a/packages/web/src/lib/playback/player-choice.ts
 +++ b/packages/web/src/lib/playback/player-choice.ts
-@@ -83,5 +83,22 @@ export const LINK_PLAYERS: readonly {
+@@ -82,6 +82,23 @@ export const LINK_PLAYERS: readonly {
+       'outplayer://x-callback-url/play?url={encodedUrl}&position={position}&subtitle={subtitles}&x-cancel={returnUrl}&x-success={returnUrl}',
      platforms: ['ios'],
    },
 +  // Two more players on an Apple TV that take an x-callback link (AIOStreamsTVOS).

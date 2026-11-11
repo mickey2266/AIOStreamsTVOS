@@ -47,11 +47,11 @@ index 5191b4c4..a51cc37a 100644
    return (
      <Modal open={open} onOpenChange={onOpenChange} title={uiText.donateTitle}>
        <div className="flex flex-col gap-5 items-center text-center p-2">
-diff --git a/packages/web/src/pages/settings/index.tsx b/packages/web/src/pages/settings/index.tsx
-index 5e4ccca7..c3a8a9c8 100644
---- a/packages/web/src/pages/settings/index.tsx
-+++ b/packages/web/src/pages/settings/index.tsx
-@@ -312,7 +312,12 @@ export function SettingsPage({
+diff --git a/packages/web/src/app/settings/page.tsx b/packages/web/src/app/settings/page.tsx
+index 1c42e094..57800c5d 100644
+--- a/packages/web/src/app/settings/page.tsx
++++ b/packages/web/src/app/settings/page.tsx
+@@ -313,7 +313,12 @@ export function SettingsPage({
            ))}
          </div>
        </Tabs>

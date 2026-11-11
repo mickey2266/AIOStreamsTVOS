@@ -1,6 +1,7 @@
-diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/components/media-row.tsx
---- a/packages/web/src/components/media-row.tsx
-+++ b/packages/web/src/components/media-row.tsx
+diff --git a/packages/web/src/components/media/media-row.tsx b/packages/web/src/components/media/media-row.tsx
+index ff4283e1..240faf33 100644
+--- a/packages/web/src/components/media/media-row.tsx
++++ b/packages/web/src/components/media/media-row.tsx
 @@ -244,8 +244,12 @@ const savedScroll = new Map<string, number>();
  /** The room after a focused card in a TV row; a card's padding leaves the room before. */
  const ROOM = 16;

@@ -1,7 +1,7 @@
-diff --git a/packages/web/src/lib/images.ts b/packages/web/src/lib/images.ts
-index f091cc34..7331a735 100644
---- a/packages/web/src/lib/images.ts
-+++ b/packages/web/src/lib/images.ts
+diff --git a/packages/web/src/lib/artwork/urls.ts b/packages/web/src/lib/artwork/urls.ts
+index f0436681..3303d0ad 100644
+--- a/packages/web/src/lib/artwork/urls.ts
++++ b/packages/web/src/lib/artwork/urls.ts
 @@ -24,6 +24,12 @@ function deviceWidth(css: number): number {
  const RESOLUTIONS = [1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
  /** As decoding bigger artwork stutters a TV. */

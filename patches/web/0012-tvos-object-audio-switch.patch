@@ -1,66 +1,7 @@
-diff --git a/packages/web/src/lib/hosts/shell/player.ts b/packages/web/src/lib/hosts/shell/player.ts
-index 8194bedd..e9f71c86 100644
---- a/packages/web/src/lib/hosts/shell/player.ts
-+++ b/packages/web/src/lib/hosts/shell/player.ts
-@@ -29,7 +29,12 @@ import type {
- } from '../../playback/engine';
- import { audioCodes } from '../../playback/track-picks';
- import { currentHost } from '..';
--import { appBridge, type AppTrack, type ShellMessage } from './bridge';
-+import {
-+  appBridge,
-+  appleTv,
-+  type AppTrack,
-+  type ShellMessage,
-+} from './bridge';
- import { passthroughFormats } from './sound';
- 
- const statsPages = (): Track[] => [
-@@ -664,6 +669,10 @@ export function playerSettings() {
-     nightMode: audio.nightMode.read(),
-     ac3Encode: audio.ac3Encode.read(),
-     cacheMb: Number(settings.player.cacheSize.read()) || 0,
-+    ...(appleTv() && {
-+      objectAudio: audio.objectAudio.read(),
-+      objectAudioLayout: audio.objectAudioLayout.read(),
-+    }),
-     ...(android
-       ? {
-           frameRate: video.frameRate.read(),
-diff --git a/packages/web/src/lib/settings.ts b/packages/web/src/lib/settings.ts
-index 0a3c5d59..eb5931cc 100644
---- a/packages/web/src/lib/settings.ts
-+++ b/packages/web/src/lib/settings.ts
-@@ -528,6 +528,10 @@ const isPercent = (value: number) => value >= 0 && value <= 100;
- export const AUDIO_CHANNELS = ['auto', 'stereo', '5.1', '7.1'] as const;
- export type AudioChannels = (typeof AUDIO_CHANNELS)[number];
- 
-+/** The speaker layouts the Apple TV app renders object audio for; DTS:X renders into these two only. */
-+export const OBJECT_AUDIO_LAYOUTS = ['7.1.4', '9.1.6'] as const;
-+export type ObjectAudioLayout = (typeof OBJECT_AUDIO_LAYOUTS)[number];
-+
- /** What plays versions inside the Android app. */
- export const PLAYER_ENGINES = ['auto', 'mpv', 'exoplayer'] as const;
- export type PlayerEngine = (typeof PLAYER_ENGINES)[number];
-@@ -992,6 +996,14 @@ export const settings = {
-       undefined,
-       ['aiostreams-app-ac3-encode']
-     ),
-+    /** The Apple TV app renders TrueHD Atmos and DTS:X objects and heights instead of playing their 7.1. */
-+    objectAudio: device<boolean>('aiostreams-web-audio-object-audio', false),
-+    /** The speakers the Apple TV app renders object audio for. */
-+    objectAudioLayout: device<ObjectAudioLayout>(
-+      'aiostreams-web-audio-object-audio-layout',
-+      '7.1.4',
-+      OBJECT_AUDIO_LAYOUTS
-+    ),
-   },
-   subtitle: {
-     ...subtitleLook,
-diff --git a/packages/web/src/pages/settings/audio.tsx b/packages/web/src/pages/settings/audio.tsx
-index 7531153e..c9c2bc0a 100644
---- a/packages/web/src/pages/settings/audio.tsx
-+++ b/packages/web/src/pages/settings/audio.tsx
+diff --git a/packages/web/src/app/settings/audio.tsx b/packages/web/src/app/settings/audio.tsx
+index e1031b28..acc5dc5f 100644
+--- a/packages/web/src/app/settings/audio.tsx
++++ b/packages/web/src/app/settings/audio.tsx
 @@ -21,8 +21,10 @@ import {
    AUDIO_DELAY_LIMIT_MS,
    AUDIO_DELAY_STEP_MS,
@@ -71,8 +12,8 @@ index 7531153e..c9c2bc0a 100644
 +  type ObjectAudioLayout,
    type Passthrough,
    type PassthroughFormat,
- } from '../../lib/settings';
-@@ -131,6 +133,10 @@ function OutputCard() {
+ } from '@/lib/settings';
+@@ -136,6 +138,10 @@ function OutputCard() {
    const [passthrough, setPassthrough] = useSetting(settings.audio.passthrough);
    const [formats, setFormats] = useSetting(settings.audio.passthroughFormats);
    const [ac3Encode, setAc3Encode] = useSetting(settings.audio.ac3Encode);
@@ -83,7 +24,7 @@ index 7531153e..c9c2bc0a 100644
    const info = useShellInfo();
    // An Apple TV copies Dolby Digital (Plus) and decodes the rest, whatever is asked.
    const tvos = appleTv();
-@@ -196,10 +202,48 @@ function OutputCard() {
+@@ -201,10 +207,48 @@ function OutputCard() {
            onValueChange={setAc3Encode}
          />
        )}
@@ -132,3 +73,62 @@ index 7531153e..c9c2bc0a 100644
  function AudioDeviceSelect() {
    const [audioDevice, setAudioDevice] = useSetting(settings.audio.device);
    const devices = useAudioDevices();
+diff --git a/packages/web/src/lib/hosts/shell/player.ts b/packages/web/src/lib/hosts/shell/player.ts
+index 5112efd0..851d93f0 100644
+--- a/packages/web/src/lib/hosts/shell/player.ts
++++ b/packages/web/src/lib/hosts/shell/player.ts
+@@ -31,7 +31,12 @@ import type {
+ } from '@/lib/playback/engine';
+ import { audioCodes } from '@/lib/playback/track-picks';
+ import { currentHost } from '..';
+-import { appBridge, type AppTrack, type ShellMessage } from './bridge';
++import {
++  appBridge,
++  appleTv,
++  type AppTrack,
++  type ShellMessage,
++} from './bridge';
+ import { exoStats } from './exo-stats';
+ import { passthroughFormats } from './sound';
+ 
+@@ -534,6 +539,10 @@ export function playerSettings() {
+     ac3Encode: audio.ac3Encode.read(),
+     cacheMb: Number(settings.player.cacheSize.read()) || 0,
+     upscaling: upscalingOn(),
++    ...(appleTv() && {
++      objectAudio: audio.objectAudio.read(),
++      objectAudioLayout: audio.objectAudioLayout.read(),
++    }),
+     ...(android
+       ? {
+           frameRate: video.frameRate.read(),
+diff --git a/packages/web/src/lib/settings/index.ts b/packages/web/src/lib/settings/index.ts
+index 9be266c1..f91a67c9 100644
+--- a/packages/web/src/lib/settings/index.ts
++++ b/packages/web/src/lib/settings/index.ts
+@@ -181,6 +181,10 @@ const isPercent = (value: number) => value >= 0 && value <= 100;
+ export const AUDIO_CHANNELS = ['auto', 'stereo', '5.1', '7.1'] as const;
+ export type AudioChannels = (typeof AUDIO_CHANNELS)[number];
+ 
++/** The speaker layouts the Apple TV app renders object audio for; DTS:X renders into these two only. */
++export const OBJECT_AUDIO_LAYOUTS = ['7.1.4', '9.1.6'] as const;
++export type ObjectAudioLayout = (typeof OBJECT_AUDIO_LAYOUTS)[number];
++
+ /** What plays versions inside the Android app. */
+ /** `auto` is the browser's own player in a browser. */
+ export const PLAYER_ENGINES = [
+@@ -685,6 +689,14 @@ export const settings = {
+       undefined,
+       ['aiostreams-app-ac3-encode']
+     ),
++    /** The Apple TV app renders TrueHD Atmos and DTS:X objects and heights instead of playing their 7.1. */
++    objectAudio: device<boolean>('aiostreams-web-audio-object-audio', false),
++    /** The speakers the Apple TV app renders object audio for. */
++    objectAudioLayout: device<ObjectAudioLayout>(
++      'aiostreams-web-audio-object-audio-layout',
++      '7.1.4',
++      OBJECT_AUDIO_LAYOUTS
++    ),
+   },
+   subtitle: {
+     ...subtitleLook,

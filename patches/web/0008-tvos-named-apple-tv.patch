@@ -1,7 +1,7 @@
-diff --git a/packages/web/src/lib/client.ts b/packages/web/src/lib/client.ts
-index ee89b856..16dfde89 100644
---- a/packages/web/src/lib/client.ts
-+++ b/packages/web/src/lib/client.ts
+diff --git a/packages/web/src/lib/jellyfin/client.ts b/packages/web/src/lib/jellyfin/client.ts
+index 03c7dded..edf77b85 100644
+--- a/packages/web/src/lib/jellyfin/client.ts
++++ b/packages/web/src/lib/jellyfin/client.ts
 @@ -29,6 +29,8 @@ function clientName(): string {
      return 'AIOStreams Web';
    }
