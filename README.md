@@ -419,12 +419,14 @@ Back behaviour and the bundled-player path. It also means:
   (`patches/web/0007-tvos-hides-settings-it-ignores.patch`) hides the Android settings that do
   nothing here:
   - The whole **Android app** section: updates (none here), **Play in the background** (leaving
-    the app pauses the video), the mpv.conf editor, and **Picture-in-picture**, whose button the
+    the app pauses the video), the mpv.conf editor and its shader files, and **Picture-in-picture**, whose button the
     player always shows. Its **Report a problem** row goes with it; the app menu (hold
     Play/Pause) has the app's diagnostics.
   - **Match the video's frame rate**: tvOS's own Match Content decides.
   - **Tunneled playback**.
   - **Engine**.
+  - **Anime upscaling**, and the player's key for it: AetherEngine has none
+    (`patches/web/0029-tvos-no-upscaling.patch`).
   - **Pass surround audio through** and its formats: an Apple TV copies Dolby Digital (Plus) and
     decodes the rest to PCM whatever is asked.
 - Settings → About names the app's version **tvOS app**, and its Credits list AetherEngine as the
