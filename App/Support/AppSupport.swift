@@ -157,6 +157,14 @@ enum MemoryLog {
         if int("canvases") > 0 { text += ", canvases \(int("canvasMB")) MB in \(int("canvases"))" }
         if int("videos") > 0 { text += ", \(int("videos")) videos" }
         text += ", \(int("cards")) cards, \(int("elements")) elements"
+        if int("episodes") > 0 { text += ", \(int("episodes")) episodes" }
+        if int("layers") > 0 { text += ", \(int("layers")) glide layers" }
+        // The artwork workers decode inside the page's process, outside the picture counts above.
+        if int("artWorkers") > 0 {
+            text += ", artwork workers \(int("artWorkers")): \(int("artRunning")) running"
+            text += " (\(int("artSlow")) slow, most \(int("artPeak"))), \(int("artQueued")) queued"
+            text += ", \(int("artKeptMB")) MB kept in \(int("artKept"))"
+        }
         lastStats = text
     }
 

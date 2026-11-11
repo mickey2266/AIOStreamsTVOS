@@ -857,8 +857,26 @@ enum BridgeScript {
     const canvases = document.getElementsByTagName('canvas');
     for (const c of canvases) canvasBytes += c.width * c.height * 4;
     const mb = (bytes) => Math.round(bytes / 1048576);
+    /*
+     * What the page's artwork workers are doing (the web app's lib/artwork.ts,
+     * patch 0027). Their decodes happen inside the page's process but are in
+     * none of the counts above, so a kill with few pictures may be theirs.
+     */
+    let art = {};
+    try {
+      art = (window.__aioArtworkStats && window.__aioArtworkStats()) || {};
+    } catch {}
     return {
       type: 'tvos-page-stats',
+      artWorkers: art.workers || 0,
+      artQueued: art.queued || 0,
+      artRunning: art.running || 0,
+      artSlow: art.slow || 0,
+      artPeak: art.peakRunning || 0,
+      artKept: art.kept || 0,
+      artKeptMB: art.keptMB || 0,
+      layers: document.querySelectorAll('[data-glide-layer]').length,
+      episodes: document.querySelectorAll('[data-ui="episode-card"],[data-ui="episode-list-item"]').length,
       path: location.pathname + location.search + location.hash,
       pictures,
       pictureMB: mb(pictureBytes),

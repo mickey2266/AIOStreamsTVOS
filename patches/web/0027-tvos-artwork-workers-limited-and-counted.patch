@@ -1,0 +1,69 @@
+diff --git a/packages/web/src/lib/artwork.ts b/packages/web/src/lib/artwork.ts
+index 85c18271..276a9e40 100644
+--- a/packages/web/src/lib/artwork.ts
++++ b/packages/web/src/lib/artwork.ts
+@@ -6,6 +6,7 @@
+ 
+ import { maybeSaved, noteSaved, saving, schedulePrune } from './cache';
+ import { isReachable } from './connection';
++import { currentHost } from './hosts';
+ 
+ export interface ShrinkJob {
+   id: number;
+@@ -177,7 +178,13 @@ export const canShrink =
+   typeof OffscreenCanvas === 'function' &&
+   typeof createImageBitmap === 'function';
+ 
+-const IN_FLIGHT = 4;
++/**
++ * Each job holds a whole image decoded, which a TV's page process can't
++ * afford a dozen of at once (AIOStreamsTVOS): two workers, two jobs each,
++ * and as many again only while those are slow.
++ */
++const TV = !!currentHost().tv;
++const IN_FLIGHT = TV ? 2 : 4;
+ /**
+  * A job still running after this long, as a huge image or a slow host's is,
+  * gives its place to the next, up to as many again.
+@@ -186,8 +193,9 @@ const SLOW_MS = 1500;
+ /** One core is left to the page. */
+ const WORKERS = Math.max(
+   1,
+-  Math.min(3, (navigator.hardwareConcurrency || 2) - 1)
++  Math.min(TV ? 2 : 3, (navigator.hardwareConcurrency || 2) - 1)
+ );
++let peakRunning = 0;
+ 
+ interface Pending extends Omit<
+   ShrinkJob,
+@@ -356,6 +364,22 @@ function start(): Slot | null {
+ // Started with the page, so the first artwork doesn't wait on the workers loading.
+ if (canShrink) for (let i = 0; i < WORKERS; i++) start();
+ 
++/**
++ * What the workers are doing, read by the TV app for its memory log: their
++ * decodes are in the page's process but in none of the page's own counts.
++ */
++if (TV)
++  (window as unknown as { __aioArtworkStats: () => unknown }).__aioArtworkStats =
++    () => ({
++      workers: slots.length,
++      queued: queue.length,
++      running: running.size,
++      slow: slots.reduce((n, s) => n + s.slow, 0),
++      peakRunning,
++      kept: drawn.size,
++      keptMB: Math.round(drawnBytes / 1048576),
++    });
++
+ /** Starts another worker only while every one is busy. */
+ function freeSlot(ahead: boolean): Slot | null {
+   if (broken) return null;
+@@ -436,6 +460,7 @@ function dispatch() {
+     queue.shift();
+     slot.busy++;
+     running.set(job.id, { job, slot });
++    peakRunning = Math.max(peakRunning, running.size);
+     job.slowTimer = setTimeout(() => {
+       if (!running.has(job.id) || slot.slow >= IN_FLIGHT) return;
+       job.released = true;

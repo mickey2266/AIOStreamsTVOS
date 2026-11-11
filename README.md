@@ -372,7 +372,15 @@ kept that from happening while browsing:
 - **Cards near the screen only.** Long rows and the Discover grid draw only the cards near the screen
   and hold the others' places empty (patches 0001 and 0002); the grid draws within one screen's
   height above and below. A grid is 10 or 12 posters across on a TV, so a wider margin kept 300 or
-  more cards mounted.
+  more cards mounted. On a TV the grid now draws within 60% of a screen's height
+  (`patches/web/0028-tvos-long-lists-draw-near-the-end.patch`), and an episode list set to the list
+  layout draws 24 episodes at first and 24 more each time its end comes within a screen, rather
+  than every episode of a season at once.
+- **Artwork workers.** The page shrinks artwork in web workers, which decode whole images inside the
+  page's process, in none of the picture counts. A TV runs two workers with two jobs each, and a
+  slow job lets as many more start (`patches/web/0027-tvos-artwork-workers-limited-and-counted.patch`),
+  where other hosts run three with four. The memory log counts them (workers, running, slow, most
+  at once, queued, bytes kept) beside the page's pictures, with the episodes and glide layers it holds.
 - **Pictures let go of.** The bridge script swaps a picture more than three screens away (cards'
   artwork, backdrops and logos) for a blank one, which lets WebKit drop its decoded copy, and puts
   it back within two. It does the same for every picture on a page kept out of sight: the home page,
