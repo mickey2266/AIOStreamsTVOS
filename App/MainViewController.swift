@@ -162,12 +162,14 @@ final class MainViewController: UIViewController, RemoteReceiver {
     private var pageEnds: [Date] = []
     /// An end this soon after the last one counts as the page failing as it loads.
     private static let quickEnd: TimeInterval = 30
+    /// How long a third quick end in a row waits before loading home again.
+    private static let retryDelay: TimeInterval = 5
 
     /**
      * The page's process ended. It loads again where it was; ended again within `quickEnd`, it
      * loads at the start, as the page it was on may be what takes it to its limit as it loads (a
-     * Jetsam report showed 13 ends in 26 s). A third quick end in a row stops reloading, and the
-     * app menu's Reload starts it again.
+     * Jetsam report showed 13 ends in 26 s). A third quick end in a row waits `retryDelay` and
+     * loads home again, so the reloads don't come back to back. None of these show a notice.
      */
     private func pageEnded(at url: URL?, reason: AIOPageEnd) {
         // The page that set a frame is gone: the video fills the screen and the page is whole again.
@@ -183,18 +185,18 @@ final class MainViewController: UIViewController, RemoteReceiver {
             u.path + (u.query.map { "?\($0)" } ?? "") + (u.fragment.map { "#\($0)" } ?? "")
         }
         MemoryLog.pageEnded(playing: player?.playing == true, reason: reason, at: place)
-        let cause = reason.rawValue == 0 ? "ran out of memory" : "stopped (\(MemoryLog.cause(reason)))"
+        // No notice: the end and its cause go to the memory log, which the app's log share carries.
         switch quick {
         case 0:
             loadPage(at: url)
-            flashStatus("The page \(cause) and reloaded.")
         case 1:
             loadPage()
-            flashStatus("The page \(cause) again as it loaded, so it started over at home.")
         default:
+            // Still ending as it loads at home: wait a moment, so tvOS can free memory, and try home again.
             pageEnds = []
-            showStatus("The page \(cause) again as it loaded, even at home, so it wasn't reloaded.\n\n"
-                + "Hold Play/Pause for options, then Reload.")
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.retryDelay) { [weak self] in
+                self?.loadPage()
+            }
         }
     }
 
