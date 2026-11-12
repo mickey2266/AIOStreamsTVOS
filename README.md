@@ -540,6 +540,11 @@ Run workflow, on any branch) replaces the **Nightly** release, and a `v*` tag
 publishes a release of its own. Sign it with your own Apple ID using a sideloading tool that
 handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid account a year.
 
+Its first step compiles the bridge script's JavaScript (`node scripts/check-bridge.mjs`), so a
+syntax error there fails the build rather than the app: WebKit runs that script before the page,
+and one error stops all of it, which leaves the page signed out, laid out as a browser and deaf to
+the remote. Run it locally after editing `App/Web/BridgeScript.swift`.
+
 ### Sideloading source
 
 Tagged releases are listed in the AltStore-format source in `altstore/source.json` (see
