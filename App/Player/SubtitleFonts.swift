@@ -77,51 +77,19 @@ enum SubtitleFonts {
 
     static var names: Set<String> { Set(candidates.keys) }
 
-    /**
-     * The font for the page's name at a size and style, or nil when neither the app nor the device has one.
-     *
-     * Sized to look as large as the system font the default draws in at `size`, not just to share its
-     * point size: a face's letters fill a different share of its em. As a share of the em (x-height,
-     * then cap height), Comic Neue and Dancing Script read from App/Fonts' files, the others the faces'
-     * published metrics: the system font (SF) 0.53 and 0.71, Helvetica Neue 0.52 and 0.71, Menlo 0.55
-     * and 0.73, Times New Roman 0.45 and 0.66, Courier New 0.42 and 0.57, Comic Neue 0.49 and 0.67,
-     * Dancing Script 0.33 and 0.72. At one point size Courier New and Dancing Script's
-     * lower case came out a fifth and a third smaller than the default's. Each face is scaled by the
-     * geometric mean of the two ratios, so neither its lower case nor its capitals run far from the
-     * default's (a script's tall capitals over its small x-height are why x-height alone isn't used).
-     * Both metrics grow with the size, so the factor is the same at every Font size the page offers.
-     */
+    /// The font for the page's name at a size and style, or nil when neither the app nor the device has one.
     @MainActor
     static func font(_ name: String?, size: CGFloat, bold: Bool, italic: Bool) -> UIFont? {
-        guard let name, let first = make(name, size: size, bold: bold, italic: italic) else {
-            if let name, told.insert(name).inserted {
-                EngineLogBook.note("[subtitles] \(name) text drawn in the system font, none of its fonts here")
-            }
-            return nil
+        guard let name else { return nil }
+        var chosen = bundledFont(name, size: size, bold: bold, italic: italic)
+        if chosen == nil, let set = candidates[name] {
+            let list = bold && italic ? set.boldItalic : bold ? set.bold : italic ? set.italic : set.regular
+            chosen = (list + set.regular).lazy.compactMap { UIFont(name: $0, size: size) }.first
         }
-        let reference = UIFont.systemFont(ofSize: size, weight: bold ? .bold : .medium)
-        let factor = matchingFactor(first, to: reference)
-        let chosen = factor == 1 ? first : (make(name, size: size * factor, bold: bold, italic: italic) ?? first)
         if told.insert(name).inserted {
-            EngineLogBook.note(String(format: "[subtitles] %@ text drawn in %@, at %.2f times the size to match the default's",
-                                      name, chosen.fontName, factor))
+            EngineLogBook.note("[subtitles] \(name) text drawn in \(chosen?.fontName ?? "the system font, none of its fonts here")")
         }
         return chosen
-    }
-
-    /// How much larger `font` is drawn to look the size of `reference` (see `font`); 1 when a metric is missing.
-    static func matchingFactor(_ font: UIFont, to reference: UIFont) -> CGFloat {
-        guard font.xHeight > 0, font.capHeight > 0, reference.xHeight > 0, reference.capHeight > 0 else { return 1 }
-        let factor = ((reference.xHeight / font.xHeight) * (reference.capHeight / font.capHeight)).squareRoot()
-        return factor.isFinite && factor > 0 ? factor : 1
-    }
-
-    @MainActor
-    private static func make(_ name: String, size: CGFloat, bold: Bool, italic: Bool) -> UIFont? {
-        if let bundled = bundledFont(name, size: size, bold: bold, italic: italic) { return bundled }
-        guard let set = candidates[name] else { return nil }
-        let list = bold && italic ? set.boldItalic : bold ? set.bold : italic ? set.italic : set.regular
-        return (list + set.regular).lazy.compactMap { UIFont(name: $0, size: size) }.first
     }
 
     private static func bundledFont(_ name: String, size: CGFloat, bold: Bool, italic: Bool) -> UIFont? {
