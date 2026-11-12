@@ -1,0 +1,37 @@
+diff --git a/packages/web/src/lib/playback/thumbnails.ts b/packages/web/src/lib/playback/thumbnails.ts
+index 2ed5414b..a87f6075 100644
+--- a/packages/web/src/lib/playback/thumbnails.ts
++++ b/packages/web/src/lib/playback/thumbnails.ts
+@@ -1,6 +1,23 @@
+ import { blobAddress, type BlobAddress } from '@/lib/artwork/shrink';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import type { PlayerEngine, Thumbnail } from './engine';
+ 
++/**
++ * Where a kept picture is shown from. The Apple TV app's WebKit draws a blob
++ * URL as a broken picture (as it does the artwork workers' and the saved
++ * artwork's), so there the picture is kept as a data URL (AIOStreamsTVOS).
++ */
++async function keptAddress(blob: Blob): Promise<BlobAddress> {
++  if (!appleTv()) return blobAddress(blob);
++  const src = await new Promise<string>((resolve, reject) => {
++    const reader = new FileReader();
++    reader.onload = () => resolve(String(reader.result));
++    reader.onerror = () => reject(reader.error);
++    reader.readAsDataURL(blob);
++  });
++  return { src, revoke: () => undefined };
++}
++
+ /** The seek bar's picture: the newest answer to the positions it asks for, cleared when it stops asking. */
+ export interface ThumbnailFeed {
+   /** Asks for the keyframe at or before `ms`, or with null, for none. */
+@@ -101,7 +118,7 @@ export function thumbnailFeed(
+     try {
+       const res = await fetch(thumbnail.src);
+       if (!res.ok) throw new Error(String(res.status));
+-      const address = await blobAddress(await res.blob());
++      const address = await keptAddress(await res.blob());
+       if (stopped) return address.revoke();
+       addresses.push(address);
+       kept = new Map(kept).set(ms, { ...thumbnail, src: address.src });

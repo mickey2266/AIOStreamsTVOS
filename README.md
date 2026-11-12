@@ -450,6 +450,10 @@ Back behaviour and the bundled-player path. It also means:
 - Settings → **Donate** lists the GitHub Sponsors and Ko-fi links as text
   (`https://github.com/sponsors/Viren070`, `https://ko-fi.com/Viren070`) rather than buttons that
   open them, as a TV has no browser to open them in (`patches/web/0011-tvos-donate-shows-links.patch`).
+- The player's Chapters list keeps each chapter's picture as a data URL rather than a blob URL,
+  which tvOS's WebKit draws as a broken picture (`patches/web/0031-tvos-chapter-pictures-as-data-urls.patch`).
+- Time format on Automatic (Settings → Interface) follows the Apple TV's 12- or 24-hour clock,
+  which the app reads from the region as each page loads and hands the page as `hours24`.
 - On a TV, the remote moves focus along a row of posters and the row scrolls only when the next
   poster would leave the screen, rather than the focus staying where the row's first poster starts
   while the row slides under it (`patches/web/0013-tvos-rows-move-focus.patch`). Keys and a
