@@ -461,6 +461,12 @@ Back behaviour and the bundled-player path. It also means:
   are never upscaled (`patches/web/0033-tvos-upscale-other-video.patch`).
 - The player's Chapters list keeps each chapter's picture as a data URL rather than a blob URL,
   which tvOS's WebKit draws as a broken picture (`patches/web/0031-tvos-chapter-pictures-as-data-urls.patch`).
+- With Autoplay next episode on, once the countdown to the next episode (or the playlist's next
+  title) comes up, the page names its address, as it does for a player in its own window from the
+  start, and the app fetches its first bytes then (AetherEngine's `prewarm`, about 8 MB, held until
+  it opens). Dismissing the countdown drops the fetch. The page still loads the next one itself when
+  this one ends; the fetch only spares it the first round trips
+  (`patches/web/0035-tvos-warms-the-next-episode.patch`).
 - Time format on Automatic (Settings → Interface) follows the Apple TV's 12- or 24-hour clock,
   which the app reads from the region as each page loads and hands the page as `hours24`.
 - On a TV, the remote moves focus along a row of posters and the row scrolls only when the next

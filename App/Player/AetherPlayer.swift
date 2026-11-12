@@ -150,22 +150,32 @@ final class AetherPlayer {
         start(request)
     }
 
-    /// The queued video's first bytes (and the index at its end, where the file keeps it), fetched while
-    /// the current one plays, so its load starts from them rather than asking for them. The engine adopts
-    /// them only for this exact address and these headers; one it declines costs nothing but the fetch.
     private func warm(_ request: LoadRequest) {
-        guard !request.live, !request.isTrailer, PlayerProtocol.isWebURL(request.url),
-              let url = URL(string: request.url) else { return }
-        let headers = request.headers
-        let name = Self.shortened(url)
+        guard !request.live, !request.isTrailer else { return }
+        warmNext(request.url, headers: request.headers)
+    }
+
+    /**
+     * The next video's first bytes (and the index at its end, where the file keeps it), fetched while
+     * the current one plays, so its load starts from them rather than asking for them. The engine adopts
+     * them only for this exact address and these headers; one it declines costs nothing but the fetch.
+     * The page names the next episode once the countdown to it comes up (`player-warm`, patches/web/0035),
+     * and loads it itself when the episode ends; nil, or a new one, drops the warm under way.
+     */
+    func warmNext(_ address: String?, headers: [String: String]) {
         warming?.cancel()
+        warming = nil
+        guard let address, PlayerProtocol.isWebURL(address), let url = URL(string: address),
+              !LoadRequest.isTrailerHost(url) else { return }
+        let name = Self.shortened(url)
         warming = Task.detached(priority: .utility) {
             let report = await AetherEngine.prewarm(url: url, httpHeaders: headers)
-            EngineLogBook.note("[player] warmed the queued video \(name): \(report)")
+            guard !Task.isCancelled else { return }
+            EngineLogBook.note("[player] warmed the next video \(name): \(report)")
         }
     }
 
-    /// The warm of the queued video, replaced when another is queued.
+    /// The warm of the next video, replaced when another is named.
     private var warming: Task<Void, Never>?
 
     /// `asLive`: loaded again as live after AVPlayer gave up on it as a finished video (`failed`).

@@ -34,8 +34,10 @@ struct LoadRequest {
     var framed = false
 
     /// A trailer, from YouTube (`YouTube.resolve`), whose streams all come from googlevideo.com.
-    var isTrailer: Bool {
-        guard let host = URL(string: url)?.host?.lowercased() else { return false }
+    var isTrailer: Bool { URL(string: url).map(Self.isTrailerHost) ?? false }
+
+    static func isTrailerHost(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
         return host == "googlevideo.com" || host.hasSuffix(".googlevideo.com")
     }
 }

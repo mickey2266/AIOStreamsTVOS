@@ -169,6 +169,10 @@ final class PlayerChannel: PlayerListener {
                           end > start else { return nil }
                     return end
                 })
+            // The episode that plays next, named as the countdown to it comes up, which the page loads itself
+            // when this one ends: its first bytes fetched now (patches/web/0035). No address drops the warm.
+            case "player-warm":
+                player.warmNext(message.text("url"), headers: try PlayerProtocol.headers(message["headers"]))
             case "player-stats-overlay",
                  "player-controls", "player-retry", "player-unqueue":
                 break
