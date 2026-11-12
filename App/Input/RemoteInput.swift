@@ -127,6 +127,7 @@ final class RemoteInput {
     func interrupt() {
         stopRepeating()
         if let held = pending {
+            note("dropped (something opened over the page)", held.type)
             clearPending()
             dropped.insert(held.type)
         }
@@ -136,11 +137,28 @@ final class RemoteInput {
         swipeTouch = nil
     }
 
+    /// An arrow's press, its touch and the swipe under way, for the remote log.
+    private func note(_ what: String, _ type: UIPress.PressType) {
+        guard let key = Self.key(for: type), Self.isArrow(type) else { return }
+        let since = ProcessInfo.processInfo.systemUptime - swipeEndedAt
+        var parts = ["\(key) \(what):", touchDown ? "finger on" : "finger off"]
+        if touchDown {
+            let dx = Int(touchAt.x - swipeAnchor.x), dy = Int(touchAt.y - swipeAnchor.y)
+            parts.append("swipe \(dx),\(dy)\(touchSwiping ? " swiping" : "")\(swipeStepped ? " stepped" : "")")
+        }
+        if since < 1 { parts.append("last swipe ended \(Int(since * 1000)) ms ago") }
+        if let held = pending, held.type == type, let from = held.from {
+            parts.append("moved \(Int(touchAt.x - from.x)),\(Int(touchAt.y - from.y)) since press")
+        }
+        EngineLogBook.remote(parts.joined(separator: " "))
+    }
+
     func press(_ press: UIPress) {
         let began = press.phase == .began
         let ended = press.phase == .ended || press.phase == .cancelled
         guard began || ended else { return }
         if began { down.insert(press.type) } else { down.remove(press.type) }
+        note(began ? "down" : (press.phase == .cancelled ? "cancelled" : "up"), press.type)
 
         switch press.type {
         case .menu:
@@ -164,6 +182,7 @@ final class RemoteInput {
             if began {
                 if arrow, partOfSwipe, !slidToEdge(press.type) {
                     dropped.insert(press.type)
+                    note("dropped (part of a swipe)", press.type)
                     return
                 }
                 // A dropped press whose end never came mustn't swallow this one's.
@@ -175,12 +194,20 @@ final class RemoteInput {
                 keyDown(key, false)
                 if key != "Enter" { startRepeating(key) }
             } else {
-                if dropped.remove(press.type) != nil { return }
+                if dropped.remove(press.type) != nil {
+                    if arrow { EngineLogBook.remote("\(key) end of a dropped press") }
+                    return
+                }
                 if let held = pending, held.type == press.type {
-                    clearPending()
                     // The finger slid off the edge: the start of a swipe, not a click.
-                    if strayTravel(since: held.from, held.type) > Self.pressSlop { return }
+                    if strayTravel(since: held.from, held.type) > Self.pressSlop {
+                        note("dropped at release (finger strayed)", press.type)
+                        clearPending()
+                        return
+                    }
+                    clearPending()
                     // Let go before it settled: a quick click, which steps once.
+                    EngineLogBook.remote("\(key) sent (quick click)")
                     tap(key)
                     return
                 }
@@ -249,6 +276,7 @@ final class RemoteInput {
         pendingTimer = Timer.scheduledTimer(withTimeInterval: Self.pressSettle, repeats: false) { [weak self] _ in
             guard let self, let held = self.pending else { return }
             if self.strayTravel(since: held.from, held.type) > Self.pressSlop {
+                self.note("dropped while settling (finger strayed)", held.type)
                 self.clearPending()
                 self.dropped.insert(held.type)
                 return
@@ -262,6 +290,7 @@ final class RemoteInput {
                 }
             }
             self.clearPending()
+            EngineLogBook.remote("\(held.key) sent (settled after \(looks) look\(looks == 1 ? "" : "s"))")
             self.keyDown(held.key, false)
             self.startRepeating(held.key)
         }
@@ -284,6 +313,7 @@ final class RemoteInput {
     private func swipeStarted() {
         touchSwiping = true
         if let held = pending {
+            note("dropped (finger started swiping)", held.type)
             clearPending()
             dropped.insert(held.type)
         }
@@ -365,6 +395,7 @@ final class RemoteInput {
                 let key = across
                     ? (swipeSign > 0 ? "ArrowRight" : "ArrowLeft")
                     : (swipeSign > 0 ? "ArrowDown" : "ArrowUp")
+                EngineLogBook.remote("\(key) sent (swipe step \(swipeSteps), \(Int(dx)),\(Int(dy)))")
                 tap(key)
             }
         case .ended, .cancelled:

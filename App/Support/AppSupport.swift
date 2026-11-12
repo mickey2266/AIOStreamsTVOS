@@ -266,6 +266,12 @@ enum AppAnswers {
             lines.append("Engine's audio and loading log, newest last:")
             lines += audio
         }
+        let remote = EngineLogBook.recentRemote
+        if !remote.isEmpty {
+            lines.append("")
+            lines.append("Remote log (uptime ms), newest last:")
+            lines += remote
+        }
         let upscaling = EngineLogBook.recentUpscaling
         if !upscaling.isEmpty {
             lines.append("")

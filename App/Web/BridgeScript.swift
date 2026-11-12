@@ -686,7 +686,24 @@ enum BridgeScript {
         const now = performance.now();
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
-        key('keydown', name, repeat);
+        const before = document.activeElement;
+        const passed = key('keydown', name, repeat);
+        // For the app's remote log: whether the page took Up (a handled key is prevented), and where focus was.
+        if (name === 'ArrowUp' && !repeat) {
+          const where = (el) =>
+            !el || el === document.body
+              ? 'nothing'
+              : el.tagName.toLowerCase() +
+                (el.dataset?.name ? ' ' + el.dataset.name : '') +
+                (el.closest?.('[data-ui]') ? ' in ' + el.closest('[data-ui]').dataset.ui : '');
+          send({
+            type: 'log',
+            level: 'info',
+            message:
+              '[remote] page ' + (passed ? 'left ArrowUp alone' : 'took ArrowUp') +
+              ', focus ' + where(before) + ' -> ' + where(document.activeElement),
+          });
+        }
         // A scrolled slide runs no animation to wait for, so the artwork sweep is told how long it runs.
         if (PAGE_SCROLLS && (name === 'ArrowUp' || name === 'ArrowDown'))
           slidingUntil = Math.max(slidingUntil, performance.now() + 300);
