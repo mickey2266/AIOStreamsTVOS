@@ -408,6 +408,8 @@ Two more of the bridge script's switches, set while chasing those memory kills, 
   opening its version picker, which draws its backdrop under two masks or a poster under a blur
   across most of the screen. Edges that would fade end sharply, and blurred washes are plain.
   The few washes the page needs are drawn once on a tiny canvas instead (patches 0004 and 0005).
+  The page background keeps its mask: a trailer playing in the hero or behind a title page shows
+  through a hole the page cuts in it, and without the mask the video plays unseen behind it.
   The one exception: with the page's **Blur episodes you haven't started** on (Settings →
   Interface → Spoilers), the episode pictures and text it blurs keep their filters.
 - **`LAYERS`**: nothing kept as a layer at rest (`will-change`), except the glide layers the slides

@@ -158,12 +158,18 @@ enum BridgeScript {
     const SPOILERS =
       "[data-ui='artwork'],[data-ui='episode-title']>span,p[data-ui='episode-title']," +
       "[data-ui='episode-synopsis'],[data-ui='wide-card-subtitle']";
+    /*
+     * A trailer playing by itself in the hero or behind a title page shows through a hole the page
+     * cuts in its background with a mask (upstream's `useVideoHole`, features/trailers/preview.tsx),
+     * set only while it plays. Stripped, the background covers the app's video: sound, black picture.
+     */
+    const HOLE = "[data-ui='page-background']";
     if (!EFFECTS)
       rules.push(
         'html:not([data-blur-spoilers]) *,html[data-blur-spoilers] *:not(' + SPOILERS + '),' +
           '*::before,*::after{filter:none!important}',
-        '*,*::before,*::after{-webkit-backdrop-filter:none!important;' +
-          'backdrop-filter:none!important;-webkit-mask-image:none!important;mask-image:none!important}'
+        '*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}',
+        '*:not(' + HOLE + '),*::before,*::after{-webkit-mask-image:none!important;mask-image:none!important}'
       );
     if (rules.length) {
       const style = document.createElement('style');
