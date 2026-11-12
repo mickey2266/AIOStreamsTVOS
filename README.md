@@ -454,7 +454,9 @@ Back behaviour and the bundled-player path. It also means:
   upscales SDR video below 1080p to the display, on its software player, from tvOS 26 (MetalFX from
   tvOS 27.1). HDR, Dolby Vision, a source as large as the display, AirPlay and live channels play as
   before; the engine's `[Upscale]` log line says why, and the statistics' Upscaling line says what it
-  did. Turning it on or off during a video, or with its key, reloads the video where it is.
+  did. Turning it on or off during a video, or with its key, reloads the video where it is. The
+  setting's help says so in place of the official app's description of its shaders
+  (`patches/web/0032-tvos-upscaling-help.patch`).
 - The player's Chapters list keeps each chapter's picture as a data URL rather than a blob URL,
   which tvOS's WebKit draws as a broken picture (`patches/web/0031-tvos-chapter-pictures-as-data-urls.patch`).
 - Time format on Automatic (Settings → Interface) follows the Apple TV's 12- or 24-hour clock,

@@ -1,0 +1,18 @@
+diff --git a/packages/web/src/app/settings/playback.tsx b/packages/web/src/app/settings/playback.tsx
+index 1ed8b6de..1f6e8aa2 100644
+--- a/packages/web/src/app/settings/playback.tsx
++++ b/packages/web/src/app/settings/playback.tsx
+@@ -514,7 +514,12 @@ function UpscalingSwitch() {
+     <Switch
+       side="right"
+       label={t`Anime upscaling`}
+-      help={t`Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles your catalogs mark as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are.`}
++      help={
++        // The Apple TV app upscales with the Apple TV's own super resolution, not the anime shaders (AIOStreamsTVOS).
++        appleTv()
++          ? t`Upscales anime below 1080p to the screen as it plays, with the Apple TV's super resolution, for sharper lines in older and lower-resolution shows. It applies to titles your catalogs mark as anime, and needs tvOS 26 or later. HDR and Dolby Vision videos, videos about as large as the screen, and live channels stay as they are. Turns itself off for a video the Apple TV can't keep up with. Switching it during a video reopens the video where it is.`
++          : t`Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles your catalogs mark as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are.`
++      }
+       value={upscaling}
+       onValueChange={setUpscaling}
+     />
