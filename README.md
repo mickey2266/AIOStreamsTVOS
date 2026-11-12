@@ -438,8 +438,6 @@ Back behaviour and the bundled-player path. It also means:
   - **Match the video's frame rate**: tvOS's own Match Content decides.
   - **Tunneled playback**.
   - **Engine**.
-  - **Anime upscaling**, and the player's key for it: AetherEngine has none
-    (`patches/web/0029-tvos-no-upscaling.patch`).
   - **Cache size**: the player always uses Automatic, and a size picked before is ignored
     (`patches/web/0030-tvos-hides-cache-size.patch`).
   - **Pass surround audio through** and its formats: an Apple TV copies Dolby Digital (Plus) and
@@ -450,6 +448,13 @@ Back behaviour and the bundled-player path. It also means:
 - Settings → **Donate** lists the GitHub Sponsors and Ko-fi links as text
   (`https://github.com/sponsors/Viren070`, `https://ko-fi.com/Viren070`) rather than buttons that
   open them, as a TV has no browser to open them in (`patches/web/0011-tvos-donate-shows-links.patch`).
+- **Anime upscaling** (Settings → Playback → Video) uses AetherEngine's super resolution rather
+  than the official app's anime shaders. The page turns it on only for what it takes for anime (an
+  AniList, Kitsu, MyAnimeList or AniDB id on the title, its season or its show), and the engine then
+  upscales SDR video below 1080p to the display, on its software player, from tvOS 26 (MetalFX from
+  tvOS 27.1). HDR, Dolby Vision, a source as large as the display, AirPlay and live channels play as
+  before; the engine's `[Upscale]` log line says why, and the statistics' Upscaling line says what it
+  did. Turning it on or off during a video, or with its key, reloads the video where it is.
 - The player's Chapters list keeps each chapter's picture as a data URL rather than a blob URL,
   which tvOS's WebKit draws as a broken picture (`patches/web/0031-tvos-chapter-pictures-as-data-urls.patch`).
 - Time format on Automatic (Settings → Interface) follows the Apple TV's 12- or 24-hour clock,

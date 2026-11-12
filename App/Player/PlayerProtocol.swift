@@ -103,6 +103,10 @@ struct PlayerSettings: Equatable {
     var objectAudio = false
     /// The page's Speakers choice under it: 7.1.4 (the default) or 9.1.6, the two beds DTS:X renders into.
     var objectAudioLayout: SpatialSpeakerLayout = .l714
+    /// The page's Anime upscaling for what plays: true only for a title it takes for anime (an AniList,
+    /// Kitsu, MyAnimeList or AniDB id on it, its season or its show) with the setting on, or as its
+    /// shortcut set it for this video (`upscalingOn` in the web app's lib/playback/upscaling.ts).
+    var upscaling = false
 }
 
 enum PlayerProtocol {
@@ -187,6 +191,7 @@ enum PlayerProtocol {
         settings.nightMode = message.flag("nightMode") == true
         settings.objectAudio = message.flag("objectAudio") == true
         settings.objectAudioLayout = message.text("objectAudioLayout") == "9.1.6" ? .l916 : .l714
+        settings.upscaling = message.flag("upscaling") == true
         // The page still sends its Cache size (`cacheMb`); the player always buffers as Automatic.
         return settings
     }

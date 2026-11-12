@@ -323,6 +323,12 @@ final class AetherPlayer {
         }
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
+        // The page's Anime upscaling, which it turns on only for anime: the engine's super resolution (#846)
+        // for SDR video below 1080p, which then plays on its software player. Not the official app's anime
+        // shaders, and only on tvOS 26 and later (MetalFX from 27.1); HDR, Dolby Vision, a source as large
+        // as the display, AirPlay and live keep their route, and the engine logs one `[Upscale]` line why.
+        options.upscalesLowResolutionVideo = settings.upscaling && !live
+        loadedUpscaling = options.upscalesLowResolutionVideo
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
         // Dolby Vision plays as its HDR10 / HLG base layer, HDR10+ metadata included, on a TV without Dolby
         // Vision always and on a Dolby Vision TV when the page's Dolby Vision switch is off: no Profile 7 ->
@@ -406,6 +412,8 @@ final class AetherPlayer {
         listener?.playerEvent("loaded")
         if holdingForLink { holdForLink() }
         if engine.isLive { nudgeFrozenLiveStart() }
+        // Settings that arrived while the load ran, after it had read them.
+        applyUpscaling()
     }
 
     /**
@@ -960,6 +968,36 @@ final class AetherPlayer {
         if next.audioChannels != old.audioChannels || next.dialogueBoost != old.dialogueBoost
             || next.nightMode != old.nightMode {
             engine.setAudioShaping(shaping)
+        }
+        // Before the load returns, `loaded` takes it up.
+        if loadedAt != nil { applyUpscaling() }
+    }
+
+    /// What the playing video was loaded with for `upscalesLowResolutionVideo`.
+    private var loadedUpscaling = false
+
+    /**
+     * The page's Anime upscaling changed for what plays (its shortcut, the setting, or settings that came
+     * after the load had read them): the engine rebuilds the session at the playhead with it, as a change
+     * of route needs. A refusal (a session it can't rebuild in place) leaves the video as it plays.
+     */
+    private func applyUpscaling() {
+        guard let request = current, !ended, !engine.isLive else { return }
+        let wanted = settings.upscaling
+        guard wanted != loadedUpscaling else { return }
+        loadedUpscaling = wanted
+        let generation = generation
+        let name = URL(string: request.url).map(Self.shortened) ?? "the video"
+        EngineLogBook.note("[player] Anime upscaling \(wanted ? "on" : "off") for \(name)")
+        Task { [weak self] in
+            do {
+                try await self?.engine.reloadAtCurrentPosition { $0.upscalesLowResolutionVideo = wanted }
+                guard let self, generation == self.generation else { return }
+                if self.paused { self.engine.pause() } else { self.engine.play() }
+            } catch is CancellationError {
+            } catch {
+                EngineLogBook.note("[player] Anime upscaling not changed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -1687,6 +1725,18 @@ final class AetherPlayer {
             var route = "\(Self.routeName(engine.videoRoute)), \(Self.formatName(engine.videoFormat))"
             if let profile = engine.sourceDVProfile { route = "Dolby Vision profile \(profile) as " + route }
             stats["dolbyVisionRoute"] = route
+        }
+        // The page's Upscaling line, as the Android app sends it.
+        if let upscale = engine.activeUpscale {
+            let from = "\(Int(upscale.sourceSize.width))x\(Int(upscale.sourceSize.height))"
+            let to = "\(Int(upscale.targetSize.width))x\(Int(upscale.targetSize.height))"
+            var line = "\(from) to \(to)"
+            if let ml = upscale.mlScale { line += String(format: ", super resolution %.0fx", ml) }
+            if upscale.degraded { line += ", without MetalFX" }
+            if let reason = upscale.disabledReason { line = "off (\(reason)), was \(line)" }
+            stats["upscaling"] = line
+        } else if loadedUpscaling {
+            stats["upscaling"] = "not used for this video (the engine's [Upscale] line says why)"
         }
         // What the TV can show, as Android lists its display's HDR types. tvOS reports no HDR10+ capability,
         // so HDR10+ is listed while it's the mode playing. Dolby Vision profiles are the Apple TV's decoder's:
