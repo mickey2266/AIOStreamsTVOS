@@ -456,7 +456,9 @@ Back behaviour and the bundled-player path. It also means:
   before; the engine's `[Upscale]` log line says why, and the statistics' Upscaling line says what it
   did. Turning it on or off during a video, or with its key, reloads the video where it is. The
   setting's help says so in place of the official app's description of its shaders
-  (`patches/web/0032-tvos-upscaling-help.patch`).
+  (`patches/web/0032-tvos-upscaling-help.patch`). **Upscale other video**, a setting of the Apple
+  TV app's own under it (off by default), does the same for everything that isn't anime; trailers
+  are never upscaled (`patches/web/0033-tvos-upscale-other-video.patch`).
 - The player's Chapters list keeps each chapter's picture as a data URL rather than a blob URL,
   which tvOS's WebKit draws as a broken picture (`patches/web/0031-tvos-chapter-pictures-as-data-urls.patch`).
 - Time format on Automatic (Settings → Interface) follows the Apple TV's 12- or 24-hour clock,

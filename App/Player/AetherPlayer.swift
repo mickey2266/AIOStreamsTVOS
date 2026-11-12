@@ -323,11 +323,13 @@ final class AetherPlayer {
         }
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
-        // The page's Anime upscaling, which it turns on only for anime: the engine's super resolution (#846)
-        // for SDR video below 1080p, which then plays on its software player. Not the official app's anime
-        // shaders, and only on tvOS 26 and later (MetalFX from 27.1); HDR, Dolby Vision, a source as large
-        // as the display, AirPlay and live keep their route, and the engine logs one `[Upscale]` line why.
-        options.upscalesLowResolutionVideo = settings.upscaling && !live
+        // The page's Anime upscaling for anime, and its Upscale other video (patches/web/0033) for the rest:
+        // the engine's super resolution (#846) for SDR video below 1080p, which then plays on its software
+        // player. Not the official app's anime shaders, and only on tvOS 26 and later (MetalFX from 27.1);
+        // HDR, Dolby Vision, a source as large as the display, AirPlay and live keep their route, and the
+        // engine logs one `[Upscale]` line why. A trailer plays as it is: it's short, mostly full size, and
+        // a muted preview in a card.
+        options.upscalesLowResolutionVideo = settings.upscaling && !live && !request.isTrailer
         loadedUpscaling = options.upscalesLowResolutionVideo
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
         // Dolby Vision plays as its HDR10 / HLG base layer, HDR10+ metadata included, on a TV without Dolby
@@ -977,18 +979,19 @@ final class AetherPlayer {
     private var loadedUpscaling = false
 
     /**
-     * The page's Anime upscaling changed for what plays (its shortcut, the setting, or settings that came
-     * after the load had read them): the engine rebuilds the session at the playhead with it, as a change
-     * of route needs. A refusal (a session it can't rebuild in place) leaves the video as it plays.
+     * The page's upscaling changed for what plays (its shortcut, Anime upscaling or Upscale other video,
+     * or settings that came after the load had read them): the engine rebuilds the session at the playhead
+     * with it, as a change of route needs. A refusal (a session it can't rebuild in place) leaves the video
+     * as it plays.
      */
     private func applyUpscaling() {
-        guard let request = current, !ended, !engine.isLive else { return }
+        guard let request = current, !ended, !engine.isLive, !request.isTrailer else { return }
         let wanted = settings.upscaling
         guard wanted != loadedUpscaling else { return }
         loadedUpscaling = wanted
         let generation = generation
         let name = URL(string: request.url).map(Self.shortened) ?? "the video"
-        EngineLogBook.note("[player] Anime upscaling \(wanted ? "on" : "off") for \(name)")
+        EngineLogBook.note("[player] upscaling \(wanted ? "on" : "off") for \(name)")
         Task { [weak self] in
             do {
                 try await self?.engine.reloadAtCurrentPosition { $0.upscalesLowResolutionVideo = wanted }
@@ -996,7 +999,7 @@ final class AetherPlayer {
                 if self.paused { self.engine.pause() } else { self.engine.play() }
             } catch is CancellationError {
             } catch {
-                EngineLogBook.note("[player] Anime upscaling not changed: \(error.localizedDescription)")
+                EngineLogBook.note("[player] upscaling not changed: \(error.localizedDescription)")
             }
         }
     }

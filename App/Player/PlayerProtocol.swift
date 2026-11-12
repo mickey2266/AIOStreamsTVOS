@@ -103,9 +103,10 @@ struct PlayerSettings: Equatable {
     var objectAudio = false
     /// The page's Speakers choice under it: 7.1.4 (the default) or 9.1.6, the two beds DTS:X renders into.
     var objectAudioLayout: SpatialSpeakerLayout = .l714
-    /// The page's Anime upscaling for what plays: true only for a title it takes for anime (an AniList,
-    /// Kitsu, MyAnimeList or AniDB id on it, its season or its show) with the setting on, or as its
-    /// shortcut set it for this video (`upscalingOn` in the web app's lib/playback/upscaling.ts).
+    /// The page's upscaling for what plays (`upscalingOn` in the web app's lib/playback/upscaling.ts): for a
+    /// title it takes for anime (an AniList, Kitsu, MyAnimeList or AniDB id on it, its season or its show)
+    /// its Anime upscaling, for anything else its Upscale other video (patches/web/0033), or as its
+    /// shortcut set it for this video.
     var upscaling = false
 }
 
