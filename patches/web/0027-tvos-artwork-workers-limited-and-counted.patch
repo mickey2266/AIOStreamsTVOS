@@ -1,0 +1,93 @@
+diff --git a/packages/web/src/lib/artwork/drawn.ts b/packages/web/src/lib/artwork/drawn.ts
+index cf184d58..210f963b 100644
+--- a/packages/web/src/lib/artwork/drawn.ts
++++ b/packages/web/src/lib/artwork/drawn.ts
+@@ -40,6 +40,11 @@ let drawnBytes = 0;
+ /** Some hundreds of posters at the sizes servers send for a card. */
+ const DRAWN_BUDGET = 24_000_000;
+ 
++/** How many copies are kept and their size, for the TV app's memory log (AIOStreamsTVOS). */
++export function drawnStats(): { count: number; bytes: number } {
++  return { count: drawn.size, bytes: drawnBytes };
++}
++
+ export function drawnArtwork(url: string): Drawn | undefined {
+   const src = newest.get(artworkKey(url));
+   const entry = src ? drawn.get(src) : undefined;
+diff --git a/packages/web/src/lib/artwork/shrink.ts b/packages/web/src/lib/artwork/shrink.ts
+index 063654f2..7b27dd92 100644
+--- a/packages/web/src/lib/artwork/shrink.ts
++++ b/packages/web/src/lib/artwork/shrink.ts
+@@ -5,7 +5,14 @@
+  */
+ 
+ import { maybeSaved, noteSaved, saving, schedulePrune } from '@/lib/cache';
+-import { artworkKey, drawnArtwork, keepDrawn, type Drawn } from './drawn';
++import { currentHost } from '@/lib/hosts';
++import {
++  artworkKey,
++  drawnArtwork,
++  drawnStats,
++  keepDrawn,
++  type Drawn,
++} from './drawn';
+ import type { ShrinkJob, ShrinkReply } from './messages';
+ import { imageAccept, noteRead, refused } from './reads';
+ 
+@@ -21,7 +28,13 @@ export const canShrink =
+   typeof OffscreenCanvas === 'function' &&
+   typeof createImageBitmap === 'function';
+ 
+-const IN_FLIGHT = 4;
++/**
++ * Each job holds a whole image decoded, which a TV's page process can't
++ * afford a dozen of at once (AIOStreamsTVOS): two workers, two jobs each,
++ * and as many again only while those are slow.
++ */
++const TV = !!currentHost().tv;
++const IN_FLIGHT = TV ? 2 : 4;
+ /**
+  * A job still running after this long, as a huge image or a slow host's is,
+  * gives its place to the next, up to as many again.
+@@ -30,8 +43,9 @@ const SLOW_MS = 1500;
+ /** One core is left to the page. */
+ const WORKERS = Math.max(
+   1,
+-  Math.min(3, (navigator.hardwareConcurrency || 2) - 1)
++  Math.min(TV ? 2 : 3, (navigator.hardwareConcurrency || 2) - 1)
+ );
++let peakRunning = 0;
+ 
+ interface Pending extends Omit<
+   ShrinkJob,
+@@ -176,6 +190,22 @@ function start(): Slot | null {
+ // Started with the page, so the first artwork doesn't wait on the workers loading.
+ if (canShrink) for (let i = 0; i < WORKERS; i++) start();
+ 
++/**
++ * What the workers are doing, read by the TV app for its memory log: their
++ * decodes are in the page's process but in none of the page's own counts.
++ */
++if (TV)
++  (window as unknown as { __aioArtworkStats: () => unknown }).__aioArtworkStats =
++    () => ({
++      workers: slots.length,
++      queued: queue.length,
++      running: running.size,
++      slow: slots.reduce((n, s) => n + s.slow, 0),
++      peakRunning,
++      kept: drawnStats().count,
++      keptMB: Math.round(drawnStats().bytes / 1048576),
++    });
++
+ /** Starts another worker only while every one is busy. */
+ function freeSlot(ahead: boolean): Slot | null {
+   if (broken) return null;
+@@ -256,6 +286,7 @@ function dispatch() {
+     queue.shift();
+     slot.busy++;
+     running.set(job.id, { job, slot });
++    peakRunning = Math.max(peakRunning, running.size);
+     job.slowTimer = setTimeout(() => {
+       if (!running.has(job.id) || slot.slow >= IN_FLIGHT) return;
+       job.released = true;

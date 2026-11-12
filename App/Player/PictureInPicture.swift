@@ -89,7 +89,6 @@ final class PictureInPicture: NSObject {
         }
         guard !active, waiting == nil, !switchingMode, !resuming else { return }
         pressedAt = CACurrentMediaTime()
-        Self.trace = []
         // In steps: as one expression, the compiler can give up type-checking it.
         let mode: String = inVideoMode ? "the video switched the TV" : "the TV is in the Home screen's mode"
         let hasCriteria: Bool = window()?.avDisplayManager.preferredDisplayCriteria != nil
@@ -167,24 +166,12 @@ final class PictureInPicture: NSObject {
 
     // MARK: Timing
 
-    /// The last start's steps, timed from the press, for the app menu.
-    private(set) static var trace: [String] = []
     private var pressedAt: CFTimeInterval = 0
 
+    /// A step of a start, timed from the press, into the system log.
     private func step(_ what: String) {
         let elapsed: Double = CACurrentMediaTime() - pressedAt
-        let line: String = String(format: "+%.2f s  ", elapsed) + what
-        NSLog("[pip] %@", line)
-        Self.trace.append(line)
-        if Self.trace.count > 30 { Self.trace.removeFirst() }
-    }
-
-    /// For the app menu: how long the last start took, step by step.
-    static var report: [String] {
-        if trace.isEmpty { return ["Picture in picture: not started yet"] }
-        var lines: [String] = ["Picture in picture, last start:"]
-        lines.append(contentsOf: trace)
-        return lines
+        NSLog("[pip] %@", String(format: "+%.2f s  ", elapsed) + what)
     }
 
     // MARK: Leaving for the Home screen

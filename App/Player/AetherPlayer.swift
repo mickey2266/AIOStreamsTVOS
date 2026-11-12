@@ -85,6 +85,9 @@ final class AetherPlayer {
      */
     private var liveOnAVPlayer = false
 
+    /// Where the page's skips end, in ms (`setSkips`).
+    private var skipEnds: [Double] = []
+
     /// A URL for the log: its host and the end of its path, without the query, where tokens go.
     static func shortened(_ url: URL) -> String {
         let path = url.path.split(separator: "/").suffix(2).joined(separator: "/")
@@ -141,10 +144,39 @@ final class AetherPlayer {
         // mpv's `append`: after the file playing, which the page only asks of a player in its own window.
         if request.append, current != nil, !ended {
             queued = request
+            warm(request)
             return
         }
         start(request)
     }
+
+    private func warm(_ request: LoadRequest) {
+        guard !request.live, !request.isTrailer else { return }
+        warmNext(request.url, headers: request.headers)
+    }
+
+    /**
+     * The next video's first bytes (and the index at its end, where the file keeps it), fetched while
+     * the current one plays, so its load starts from them rather than asking for them. The engine adopts
+     * them only for this exact address and these headers; one it declines costs nothing but the fetch.
+     * The page names the next episode once the countdown to it comes up (`player-warm`, patches/web/0035),
+     * and loads it itself when the episode ends; nil, or a new one, drops the warm under way.
+     */
+    func warmNext(_ address: String?, headers: [String: String]) {
+        warming?.cancel()
+        warming = nil
+        guard let address, PlayerProtocol.isWebURL(address), let url = URL(string: address),
+              !LoadRequest.isTrailerHost(url) else { return }
+        let name = Self.shortened(url)
+        warming = Task.detached(priority: .utility) {
+            let report = await AetherEngine.prewarm(url: url, httpHeaders: headers)
+            guard !Task.isCancelled else { return }
+            EngineLogBook.note("[player] warmed the next video \(name): \(report)")
+        }
+    }
+
+    /// The warm of the next video, replaced when another is named.
+    private var warming: Task<Void, Never>?
 
     /// `asLive`: loaded again as live after AVPlayer gave up on it as a finished video (`failed`).
     /// `onAVPlayer`: a live channel loaded again on AVPlayer, its audio unidentified on the engine's reader (`loaded`).
@@ -160,13 +192,20 @@ final class AetherPlayer {
         }
         // The page names the new video once it starts (`now-playing`).
         if !asLive && !onAVPlayer { title = nil }
+        flushStartTiming()
         generation += 1
         let generation = generation
+        loadBegan = ProcessInfo.processInfo.systemUptime
+        watchRouteDuringStart()
+        audioReadyAt = nil
+        loadedAt = nil
         current = request
         queued = nil
         ended = false
         addedSubtitles = [:]
         lastBuffered = nil
+        // The page sends the next file's skips once it has loaded it.
+        skipEnds = []
         // The page asks again for the next file's reference track.
         endLineWatch()
         health = PlaybackHealth()
@@ -187,9 +226,19 @@ final class AetherPlayer {
         // is asked, alongside the audio session's activation rather than after it.
         let declaredLive = asLive || onAVPlayer || request.live
         let checks = !declaredLive && !request.isTrailer && LiveHLS.mayBePlaylist(url)
+        let waitsForSession = primes
         loading = Task { [weak self] in
             async let checked: LiveHLS.Verdict? = checks ? LiveHLS.check(url, headers: request.headers) : nil
-            await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
+            // The session's activation is a round trip to the system's audio server, and it went in front
+            // of the whole load. It runs beside the load now, which opens the file for far longer; AVPlayer
+            // activates the session itself as it plays (engine #24), so nothing in the load needs it
+            // first. The Dolby primer plays into the session, so with the primer on the load still waits.
+            let activation = Task { @MainActor [weak self] in
+                await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
+                guard let self, generation == self.generation else { return }
+                self.audioReadyAt = ProcessInfo.processInfo.systemUptime
+            }
+            if waitsForSession { await activation.value }
             guard let self, generation == self.generation else { return }
             // Silent Dolby through the load, until the video's sound has started, so decoded
             // multichannel sound isn't downmixed into a stereo link (Continuous Audio Connection off).
@@ -203,6 +252,8 @@ final class AetherPlayer {
             if let verdict = await checked {
                 guard generation == self.generation else { return }
                 live = verdict.live
+                // The load waited for it, so its time is the start's too.
+                self.markStart("live check done")
                 EngineLogBook.note("[player] live check: \(verdict.reason) (\(Self.shortened(url)))")
             } else if request.live, !asLive {
                 EngineLogBook.note("[player] live: the page says so (\(Self.shortened(url)))")
@@ -217,6 +268,7 @@ final class AetherPlayer {
                     options: self.options(for: request, live: live)
                 )
                 guard generation == self.generation else { return }
+                self.loadedAt = ProcessInfo.processInfo.systemUptime
                 self.loaded(request)
             } catch is CancellationError {
                 // Another load took its place.
@@ -252,6 +304,10 @@ final class AetherPlayer {
         if let manager = view.window?.avDisplayManager {
             options.matchContentEnabled = manager.isDisplayCriteriaMatchingEnabled
         }
+        // A video drawn in a box of the page (a trailer playing by itself, `LoadRequest.framed`): the TV stays in
+        // the mode it's in rather than blanking to match a muted preview. The engine writes no criteria and
+        // waits for none (AE#842's `.host`); the same session shown whole afterwards keeps that mode too.
+        if request.framed { options.displayCriteriaOwner = .host }
         // TrueHD, DTS and DTS-HD can't leave an Apple TV as a bitstream, so they're decoded and reach
         // the receiver as multichannel PCM, up to 7.1, as Infuse plays them: TrueHD Atmos and DTS:X
         // as their 7.1, without the objects and heights, unless the page's Object audio switch is on
@@ -277,6 +333,14 @@ final class AetherPlayer {
         }
         options.audioShaping = shaping
         options.audioDelaySeconds = settings.audioDelayMs / 1000
+        // The page's Anime upscaling for anime, and its Upscale other video (patches/web/0033) for the rest:
+        // the engine's super resolution (#846) for SDR video below 1080p, which then plays on its software
+        // player. Not the official app's anime shaders, and only on tvOS 26 and later (MetalFX from 27.1);
+        // HDR, Dolby Vision, a source as large as the display, AirPlay and live keep their route, and the
+        // engine logs one `[Upscale]` line why. A trailer plays as it is: it's short, mostly full size, and
+        // a muted preview in a card.
+        options.upscalesLowResolutionVideo = settings.upscaling && !live && !request.isTrailer
+        loadedUpscaling = options.upscalesLowResolutionVideo
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
         // Dolby Vision plays as its HDR10 / HLG base layer, HDR10+ metadata included, on a TV without Dolby
         // Vision always and on a Dolby Vision TV when the page's Dolby Vision switch is off: no Profile 7 ->
@@ -285,11 +349,8 @@ final class AetherPlayer {
         if !settings.dolbyVision || !AetherEngine.displayCapabilities.supportsDolbyVision {
             options.dolbyVisionHandling = .baseLayerOnly
         }
-        // The page's Cache size: the engine buffers ahead until the cache holds that much, and keeps what
-        // played behind it in the same space, so a seek back is at once. The window is the engine's
-        // whole-source opt-in, bounded by those bytes (`PrefetchDiskBudget`) rather than a count of
-        // segments, as the file's bitrate isn't known before it opens. It stays at least 10 segments
-        // (~40 s) ahead whatever the size, and a quarter of the free space caps it.
+        // Always Automatic: the page's Cache size is hidden on tvOS (web patch 0030), and a size saved
+        // before then is ignored.
         // Automatic buffers 10 minutes ahead, which a remux needs to ride out a slow stretch of the
         // source: about 6 GB at 80 Mbit/s. The engine's own automatic (~40 s ahead) is a few hundred
         // MB of a remux, gone in one hiccup. The bytes are left to the engine's quarter of the free
@@ -297,11 +358,7 @@ final class AetherPlayer {
         // engine's software player keeps its packets in memory on tvOS, 96 MB ahead and 128 MB
         // behind, and neither changes anything there.
         // Live can't be read ahead of the broadcast, so it keeps the engine's own live window (nothing set).
-        if live {
-        } else if settings.cacheMb > 0 {
-            options.forwardBufferSegments = Self.cacheWindowSegments
-            options.sessionCacheByteBudget = settings.cacheMb * 1_000_000
-        } else {
+        if !live {
             options.forwardBufferSegments = Self.automaticWindowSegments
             // Without a budget, a window of 150 or fewer keeps the engine's 2 GiB cap, under 4 minutes
             // of a remux. Asking for more than any Apple TV holds leaves only the quarter-of-free-space
@@ -318,9 +375,6 @@ final class AetherPlayer {
         return options
     }
 
-    /// The engine's largest forward window (about 3 hours of 4 s segments): with a Cache size set, the
-    /// bytes bound the buffer, not this.
-    private static let cacheWindowSegments = 2700
     /// Automatic's forward window: 10 minutes of the engine's 4 s segments.
     private static let automaticWindowSegments = 150
 
@@ -365,10 +419,13 @@ final class AetherPlayer {
         pickSubtitle(request)
         reportTracks()
         reportChapters()
+        applySkipLandings()
         if engine.duration > 0 { listener?.playerState(["durationMs": engine.duration * 1000]) }
         listener?.playerEvent("loaded")
         if holdingForLink { holdForLink() }
         if engine.isLive { nudgeFrozenLiveStart() }
+        // Settings that arrived while the load ran, after it had read them.
+        applyUpscaling()
     }
 
     /**
@@ -489,6 +546,7 @@ final class AetherPlayer {
 
     /// The video shows its first picture and plays: the page stops showing buffering.
     private func firstFrameShown() {
+        logStartTiming()
         // The HDMI link widens from its idle stereo once sound plays (Continuous Audio Connection off).
         AudioOutput.playbackStarted()
         // The video's own sound plays alongside the Dolby, then alone, then is paused and played if the
@@ -525,6 +583,7 @@ final class AetherPlayer {
     }
 
     func stop() {
+        flushStartTiming()
         generation += 1
         holdingForLink = false
         loading?.cancel()
@@ -769,9 +828,116 @@ final class AetherPlayer {
     /// How long a pick's plain move gets before its reader is restarted.
     private static let pickedSubtitleRestartAfter: TimeInterval = 6
 
+    /// Where the page's skips end (intro, recap, credits), in ms. The engine fetches the bytes each
+    /// lands on ahead of the skip while the link has room, as the Android app's player does, so the
+    /// skip doesn't wait on a new request. Sent again for every video, and held until the video is
+    /// loaded.
+    func setSkips(endsMs: [Double]) {
+        skipEnds = endsMs
+        applySkipLandings()
+    }
+
+    private func applySkipLandings() {
+        guard current != nil, !ended, !engine.isLive else { return }
+        engine.prefetchLandings(atSeconds: skipEnds.map { $0 / 1000 })
+    }
+
+    // MARK: Timing
+
+    /// When the current video's load began, its audio session was ready and the engine's load returned,
+    /// for `logStartTiming`; and when the last seek was asked, for the seek's own line.
+    private var loadBegan: TimeInterval?
+    private var audioReadyAt: TimeInterval?
+    private var loadedAt: TimeInterval?
+    private var seekBegan: TimeInterval?
+    private var seekTarget: Double = 0
+    /// What happened during the current video's start, in order, in ms from the load: the engine's
+    /// startup checkpoints, its first `playing`, and each audio route change with the channels in use.
+    private var startMarks: [String] = []
+    private var routeWatch: NSObjectProtocol?
+
+    /// Notes a moment of the start for `logStartTiming`, while the start is under way.
+    private func markStart(_ what: String) {
+        guard let began = loadBegan else { return }
+        startMarks.append(String(format: "%@ %.0f", what, (ProcessInfo.processInfo.systemUptime - began) * 1000))
+    }
+
+    /// An audio route change during a start: where the HDMI link changes format (stereo PCM to Dolby, say).
+    private func watchRouteDuringStart() {
+        guard routeWatch == nil else { return }
+        routeWatch = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            let reason = raw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+            let channels = AudioOutput.channelsInUse
+            MainActor.assumeIsolated {
+                self?.markStart("audio route \(Self.reasonName(reason)) (\(channels) ch)")
+            }
+        }
+    }
+
+    private static func reasonName(_ reason: AVAudioSession.RouteChangeReason?) -> String {
+        switch reason {
+        case .newDeviceAvailable: return "new device"
+        case .oldDeviceUnavailable: return "device gone"
+        case .categoryChange: return "category"
+        case .override: return "override"
+        case .wakeFromSleep: return "wake"
+        case .noSuitableRouteForCategory: return "no route"
+        case .routeConfigurationChange: return "configuration"
+        default: return "change"
+        }
+    }
+
+    /// One line for the first picture: where the start's time went. The engine's own `open timings` line
+    /// beside it splits the engine's load into connect, open and stream info, and the marks say when the
+    /// probe, the display's mode switch, the play and the audio route's changes came.
+    ///
+    /// The line is written `startMarksAfterPicture` after the first picture, so it has the audio route's
+    /// changes as the sound starts (and `AudioOutput.playbackStarted`'s asks at 1, 3 and 6 s), or sooner
+    /// when the next video starts or the page stops this one.
+    private func logStartTiming() {
+        guard let began = loadBegan, startTimingLine == nil else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        func ms(_ t: TimeInterval?) -> String { t.map { String(format: "%.0f", ($0 - began) * 1000) } ?? "-" }
+        startTimingLine = "[player] start timing (ms from the load): audio session ready \(ms(audioReadyAt)), "
+            + "engine loaded \(ms(loadedAt)), first picture \(ms(now))"
+            + (holdingForLink ? ", held for the link" : "")
+        let generation = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.startMarksAfterPicture) { [weak self] in
+            guard let self, generation == self.generation else { return }
+            self.flushStartTiming()
+        }
+    }
+
+    /// The first picture's numbers, waiting for the marks that follow it.
+    private var startTimingLine: String?
+    private static let startMarksAfterPicture: TimeInterval = 8
+
+    /// Writes the start's line, if the video showed a picture, and ends the marks.
+    private func flushStartTiming() {
+        if let line = startTimingLine {
+            EngineLogBook.note(line + (startMarks.isEmpty ? "" : "; " + startMarks.joined(separator: ", ")))
+        }
+        startTimingLine = nil
+        startMarks = []
+        loadBegan = nil
+    }
+
+    /// One line for a seek: from the page's ask to the engine saying it is playing again.
+    private func logSeekTiming() {
+        guard let began = seekBegan else { return }
+        seekBegan = nil
+        let took = (ProcessInfo.processInfo.systemUptime - began) * 1000
+        EngineLogBook.note(String(format: "[player] seek to %.1f s took %.0f ms", seekTarget, took))
+    }
+
     func seek(_ positionMs: Double) {
         guard current != nil else { return }
         let seconds = max(0, positionMs / 1000)
+        seekBegan = ProcessInfo.processInfo.systemUptime
+        seekTarget = seconds
         Task { [weak self] in await self?.engine.seek(to: seconds) }
     }
 
@@ -814,6 +980,37 @@ final class AetherPlayer {
         if next.audioChannels != old.audioChannels || next.dialogueBoost != old.dialogueBoost
             || next.nightMode != old.nightMode {
             engine.setAudioShaping(shaping)
+        }
+        // Before the load returns, `loaded` takes it up.
+        if loadedAt != nil { applyUpscaling() }
+    }
+
+    /// What the playing video was loaded with for `upscalesLowResolutionVideo`.
+    private var loadedUpscaling = false
+
+    /**
+     * The page's upscaling changed for what plays (its shortcut, Anime upscaling or Upscale other video,
+     * or settings that came after the load had read them): the engine rebuilds the session at the playhead
+     * with it, as a change of route needs. A refusal (a session it can't rebuild in place) leaves the video
+     * as it plays.
+     */
+    private func applyUpscaling() {
+        guard let request = current, !ended, !engine.isLive, !request.isTrailer else { return }
+        let wanted = settings.upscaling
+        guard wanted != loadedUpscaling else { return }
+        loadedUpscaling = wanted
+        let generation = generation
+        let name = URL(string: request.url).map(Self.shortened) ?? "the video"
+        EngineLogBook.note("[player] upscaling \(wanted ? "on" : "off") for \(name)")
+        Task { [weak self] in
+            do {
+                try await self?.engine.reloadAtCurrentPosition { $0.upscalesLowResolutionVideo = wanted }
+                guard let self, generation == self.generation else { return }
+                if self.paused { self.engine.pause() } else { self.engine.play() }
+            } catch is CancellationError {
+            } catch {
+                EngineLogBook.note("[player] upscaling not changed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -940,8 +1137,23 @@ final class AetherPlayer {
                 guard let self, self.current != nil, !self.ended else { return }
                 self.listener?.playerState(["seeking": seeking])
                 // mpv's playback-restart: playing again after a seek.
-                if !seeking { self.listener?.playerEvent("restart") }
+                if !seeking {
+                    self.logSeekTiming()
+                    self.listener?.playerEvent("restart")
+                }
             }
+            .store(in: &watching)
+        // The engine's startup checkpoints (the probe, the display's mode switch, the session) and its
+        // first `playing`, for the start's line (`logStartTiming`).
+        engine.$startupProgress
+            .compactMap { $0?.checkpoint }
+            .removeDuplicates()
+            .sink { [weak self] checkpoint in self?.markStart("\(checkpoint)") }
+            .store(in: &watching)
+        engine.$state
+            .map { $0 == .playing }
+            .removeDuplicates()
+            .sink { [weak self] playing in if playing { self?.markStart("playing") } }
             .store(in: &watching)
         engine.$hasFirstFrameReadyForDisplay
             .removeDuplicates()
@@ -1527,6 +1739,8 @@ final class AetherPlayer {
             if let profile = engine.sourceDVProfile { route = "Dolby Vision profile \(profile) as " + route }
             stats["dolbyVisionRoute"] = route
         }
+        // The page's Upscaling line, as the Android app sends it.
+        if let summary = upscalingSummary { stats["upscaling"] = summary }
         // What the TV can show, as Android lists its display's HDR types. tvOS reports no HDR10+ capability,
         // so HDR10+ is listed while it's the mode playing. Dolby Vision profiles are the Apple TV's decoder's:
         // every Apple TV 4K decodes profiles 5 and 8 itself, whatever the TV.
@@ -1596,6 +1810,35 @@ final class AetherPlayer {
         lastVideo = ["Last video: \(name), \(ending)\(at), \(time)"] + videoReport
     }
 
+    /**
+     * What the upscaling stage did for the video, for the page's Upscaling line and the report; nil when it
+     * wasn't asked for. The stages that ran are spelled out. MetalFX scales what the super resolution leaves
+     * short of the target; once the engine drops it (over its frame budget, and then for the whole run of the
+     * app), the target is the super resolution's own size. Both sizes are even, as the engine's plan makes them.
+     */
+    private var upscalingSummary: String? {
+        guard let upscale = engine.activeUpscale else {
+            return loadedUpscaling ? "not used for this video (the engine's [Upscale] line says why)" : nil
+        }
+        let from = "\(Int(upscale.sourceSize.width))x\(Int(upscale.sourceSize.height))"
+        let to = "\(Int(upscale.targetSize.width))x\(Int(upscale.targetSize.height))"
+        var stages: [String] = []
+        if let ml = upscale.mlScale { stages.append(String(format: "super resolution %.0fx", ml)) }
+        let reached = upscale.mlScale.map { ml in
+            Int((Float(upscale.sourceSize.width) * ml).rounded(.down)) & ~1 == Int(upscale.targetSize.width)
+                && Int((Float(upscale.sourceSize.height) * ml).rounded(.down)) & ~1 == Int(upscale.targetSize.height)
+        } ?? false
+        if !reached { stages.append("MetalFX") }
+        var line = "\(from) to \(to): " + stages.joined(separator: " then ")
+        if upscale.degraded {
+            line += " (MetalFX dropped: the stage ran over its frame budget)"
+        } else if reached {
+            line += " (reached the target, so MetalFX wasn't needed)"
+        }
+        if let reason = upscale.disabledReason { line = "off (\(reason)), was \(line)" }
+        return line
+    }
+
     /// What the app menu and the diagnostics say about the video and its sound.
     var report: [String] {
         guard current != nil, !ended else {
@@ -1617,6 +1860,7 @@ final class AetherPlayer {
                 + " → shown as \(Self.formatName(engine.videoFormat))",
             "Video decoder: \(engine.activeVideoDecoder ?? "none")",
         ]
+        if let upscaling = upscalingSummary { lines.append("Upscaling: \(upscaling)") }
         if let audio = activeAudio {
             lines.append("Audio track: \(audio.codec) \(audio.channels) ch"
                 + (audio.profile.map { ", \($0)" } ?? "")

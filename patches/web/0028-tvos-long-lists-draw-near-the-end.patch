@@ -1,0 +1,82 @@
+diff --git a/packages/web/src/components/media/episodes.tsx b/packages/web/src/components/media/episodes.tsx
+index 4c510ce4..95f6976a 100644
+--- a/packages/web/src/components/media/episodes.tsx
++++ b/packages/web/src/components/media/episodes.tsx
+@@ -34,6 +34,7 @@ import { useVersionPicker } from '@/features/versions/version-picker';
+ import { DownloadButton } from '@/features/downloads/download-button';
+ import { useDownloadOf } from '@/lib/downloads';
+ import { useHold } from '@/hooks/use-hold';
++import { useInView } from '@/hooks/use-in-view';
+ import { fadeIn } from './media-row';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
+ 
+@@ -521,6 +522,21 @@ export function EpisodeList({
+   /** Side by side on wide screens. */
+   columns?: boolean;
+ }) {
++  // A TV draws a long season a stretch at a time, and more as the end comes
++  // near: every episode at once is some hundreds of cards, and their
++  // pictures, in a page process that has little to spare (AIOStreamsTVOS).
++  const tv = !!currentHost().tv;
++  const anchored = anchorId ? episodes.findIndex((e) => e.Id === anchorId) : -1;
++  const [limit, setLimit] = React.useState(() =>
++    tv ? Math.max(TV_EPISODES_FIRST, anchored + TV_EPISODES_MORE) : Infinity
++  );
++  const more = useInView<HTMLDivElement>(
++    () => setLimit((n) => n + TV_EPISODES_MORE),
++    // eslint-disable-next-line lingui/no-unlocalized-strings -- a root margin
++    '100% 0px',
++    [limit]
++  );
++  const drawn = limit < episodes.length ? episodes.slice(0, limit) : episodes;
+   return (
+     <div
+       data-ui="episode-list"
+@@ -530,7 +546,7 @@ export function EpisodeList({
+         columns && 'xl:grid-cols-2 min-[1800px]:grid-cols-3'
+       )}
+     >
+-      {episodes.map((episode, i) => (
++      {drawn.map((episode, i) => (
+         <div
+           key={episode.Id}
+           ref={episode.Id === anchorId ? anchorRef : undefined}
+@@ -543,10 +559,17 @@ export function EpisodeList({
+           </div>
+         </div>
+       ))}
++      {drawn.length < episodes.length && (
++        <div ref={more} className="col-span-full h-px" aria-hidden />
++      )}
+     </div>
+   );
+ }
+ 
++/** Episodes a TV draws first, and how many more each time the end comes near. */
++const TV_EPISODES_FIRST = 24;
++const TV_EPISODES_MORE = 24;
++
+ export function EpisodeListSkeleton({ columns }: { columns?: boolean }) {
+   return (
+     <div
+diff --git a/packages/web/src/components/media/mixed-grid.tsx b/packages/web/src/components/media/mixed-grid.tsx
+index f987d692..68bc9017 100644
+--- a/packages/web/src/components/media/mixed-grid.tsx
++++ b/packages/web/src/components/media/mixed-grid.tsx
+@@ -3,6 +3,7 @@ import { Skeleton } from '@aiostreams/ui/skeleton';
+ import type { JellyfinClient } from '@/lib/jellyfin/client';
+ import { cardImages, cardShape, animatedPosterOf } from '@/lib/artwork/urls';
+ import { itemSubtitle, progressOf } from '@/lib/format';
++import { currentHost } from '@/lib/hosts';
+ import { href, itemPath } from '@/lib/paths';
+ import { ScrollRoot, watch } from '@/hooks/use-in-view';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
+@@ -17,7 +18,7 @@ import { CardGrid, fadeIn } from './media-row';
+  * by half a row, so one screen still mounts a row long before it's in sight.
+  */
+ // eslint-disable-next-line lingui/no-unlocalized-strings -- a root margin
+-const DRAWN_MARGIN = '100% 0px';
++const DRAWN_MARGIN = currentHost().tv ? '60% 0px' : '100% 0px';
+ /** Drawn before they're first measured, so a grid's first screen shows at once. */
+ const FIRST_DRAWN = 30;
+ 

@@ -1,16 +1,16 @@
-diff --git a/packages/web/src/pages/settings/about.tsx b/packages/web/src/pages/settings/about.tsx
-index a8883d58..b83ccf39 100644
---- a/packages/web/src/pages/settings/about.tsx
-+++ b/packages/web/src/pages/settings/about.tsx
-@@ -5,6 +5,7 @@ import { Button } from '@aiostreams/ui/button';
- import { useSession } from '../../lib/session';
- import { currentHost } from '../../lib/hosts';
- import { useShellInfo, type ShellInfo } from '../../lib/hosts/shell';
-+import { appleTv } from '../../lib/hosts/shell/bridge';
- import { serverAddress } from '../../lib/servers';
- import { useServerInfo } from '../../lib/server-info';
- import { LicensesSetting } from '../../components/licenses';
-@@ -55,7 +56,12 @@ export function AboutSection() {
+diff --git a/packages/web/src/app/settings/about.tsx b/packages/web/src/app/settings/about.tsx
+index e41938f9..8a1d3e89 100644
+--- a/packages/web/src/app/settings/about.tsx
++++ b/packages/web/src/app/settings/about.tsx
+@@ -9,6 +9,7 @@ import { chooseUsageStats, usageStatsOffered } from '@/lib/usage-stats';
+ import { usageStatsText } from '@/components/shell/usage-stats';
+ import { currentHost } from '@/lib/hosts';
+ import { useShellInfo, type ShellInfo } from '@/lib/hosts/shell';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import { serverAddress } from '@/lib/jellyfin/servers';
+ import { useServerInfo } from '@/lib/jellyfin/server-info';
+ import { LicensesSetting } from './_components/licenses';
+@@ -59,7 +60,12 @@ export function AboutSection() {
      ...(shell
        ? ([
            [
@@ -24,7 +24,7 @@ index a8883d58..b83ccf39 100644
              shell.app,
            ],
            ...(shell.player && !shell.mpv
-@@ -143,7 +149,8 @@ function credits(
+@@ -167,7 +173,8 @@ function credits(
        help: t`The API this app speaks.`,
        url: 'https://jellyfin.org',
      },
@@ -34,7 +34,7 @@ index a8883d58..b83ccf39 100644
        ? [
            { name: 'mpv', help: t`Plays the video.`, url: 'https://mpv.io' },
            {
-@@ -164,3 +171,52 @@ function credits(
+@@ -188,3 +195,52 @@ function credits(
        : []),
    ];
  }

@@ -28,10 +28,16 @@ struct LoadRequest {
     /// The server says it's live (a Live TV channel's `IsInfiniteStream`). False isn't a promise: an
     /// add-on's stream may be live without saying so, which `LiveHLS` finds out.
     let live: Bool
+    /// Drawn in a box of the page from its start (a trailer playing by itself in a card, the hero or a title
+    /// page), as the bridge script marks a load the page framed in the same turn (VideoStage). The TV keeps
+    /// its mode for it: a muted preview isn't worth the screen blanking for Match Content.
+    var framed = false
 
     /// A trailer, from YouTube (`YouTube.resolve`), whose streams all come from googlevideo.com.
-    var isTrailer: Bool {
-        guard let host = URL(string: url)?.host?.lowercased() else { return false }
+    var isTrailer: Bool { URL(string: url).map(Self.isTrailerHost) ?? false }
+
+    static func isTrailerHost(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
         return host == "googlevideo.com" || host.hasSuffix(".googlevideo.com")
     }
 }
@@ -99,8 +105,11 @@ struct PlayerSettings: Equatable {
     var objectAudio = false
     /// The page's Speakers choice under it: 7.1.4 (the default) or 9.1.6, the two beds DTS:X renders into.
     var objectAudioLayout: SpatialSpeakerLayout = .l714
-    /// Megabytes of the stream to hold, ahead and behind, 0 for the engine's own (`AetherPlayer.options`).
-    var cacheMb = 0
+    /// The page's upscaling for what plays (`upscalingOn` in the web app's lib/playback/upscaling.ts): for a
+    /// title it takes for anime (an AniList, Kitsu, MyAnimeList or AniDB id on it, its season or its show)
+    /// its Anime upscaling, for anything else its Upscale other video (patches/web/0033), or as its
+    /// shortcut set it for this video.
+    var upscaling = false
 }
 
 enum PlayerProtocol {
@@ -120,7 +129,8 @@ enum PlayerProtocol {
             audioLanguages: try languages(message["audioLanguages"]),
             subtitleLanguages: try languages(message["subtitleLanguages"]),
             subtitleMode: message.text("subtitleMode").flatMap(SubtitleMode.init(rawValue:)) ?? .default,
-            live: message.flag("live") == true
+            live: message.flag("live") == true,
+            framed: message.flag("framed") == true
         )
     }
 
@@ -184,9 +194,8 @@ enum PlayerProtocol {
         settings.nightMode = message.flag("nightMode") == true
         settings.objectAudio = message.flag("objectAudio") == true
         settings.objectAudioLayout = message.text("objectAudioLayout") == "9.1.6" ? .l916 : .l714
-        // The page offers 128 to 1000 MB; a value far outside that is held to 64...4000.
-        let cacheMb = message.number("cacheMb") ?? 0
-        settings.cacheMb = cacheMb.isFinite && cacheMb > 0 ? Int(min(max(cacheMb, 64), 4000)) : 0
+        settings.upscaling = message.flag("upscaling") == true
+        // The page still sends its Cache size (`cacheMb`); the player always buffers as Automatic.
         return settings
     }
 

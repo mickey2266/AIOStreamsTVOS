@@ -1,7 +1,7 @@
-diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/components/media-row.tsx
-index 83e4c6c7..0cc99bb1 100644
---- a/packages/web/src/components/media-row.tsx
-+++ b/packages/web/src/components/media-row.tsx
+diff --git a/packages/web/src/components/media/media-row.tsx b/packages/web/src/components/media/media-row.tsx
+index d8683ef5..ff4283e1 100644
+--- a/packages/web/src/components/media/media-row.tsx
++++ b/packages/web/src/components/media/media-row.tsx
 @@ -79,28 +79,29 @@ const WINDOWED = 40;
  /** Cards drawn past each side of the view, so the next one a key moves to is there. */
  const MARGIN = 12;

@@ -1,20 +1,20 @@
-diff --git a/packages/web/src/components/player/controls.tsx b/packages/web/src/components/player/controls.tsx
-index 485faaa2..47035d8c 100644
---- a/packages/web/src/components/player/controls.tsx
-+++ b/packages/web/src/components/player/controls.tsx
-@@ -340,6 +340,7 @@ export function PlayerControls({
+diff --git a/packages/web/src/features/player/controls.tsx b/packages/web/src/features/player/controls.tsx
+index 87e0d0f5..454eb4c5 100644
+--- a/packages/web/src/features/player/controls.tsx
++++ b/packages/web/src/features/player/controls.tsx
+@@ -351,6 +351,7 @@ export function PlayerControls({
  
    usePlayerKeys({
      player,
 +    stream: item.Id,
      root,
      ready,
-     visible,
-diff --git a/packages/web/src/components/player/keys.ts b/packages/web/src/components/player/keys.ts
-index 9930381d..288c596b 100644
---- a/packages/web/src/components/player/keys.ts
-+++ b/packages/web/src/components/player/keys.ts
-@@ -40,6 +40,8 @@ type Outcome = boolean | void | 'quiet' | 'brief';
+     visible: shown.get,
+diff --git a/packages/web/src/features/player/keys.ts b/packages/web/src/features/player/keys.ts
+index 706f3796..61725b70 100644
+--- a/packages/web/src/features/player/keys.ts
++++ b/packages/web/src/features/player/keys.ts
+@@ -42,6 +42,8 @@ type Outcome = boolean | void | 'quiet' | 'brief';
  
  interface PlayerKeys {
    player: PlayerController;
@@ -23,7 +23,7 @@ index 9930381d..288c596b 100644
    /** The controls, which Back leaves before it leaves the player. */
    root: React.RefObject<HTMLElement | null>;
    /** False until the first frame. */
-@@ -70,6 +72,11 @@ interface PlayerKeys {
+@@ -72,6 +74,11 @@ interface PlayerKeys {
  /** The player's shortcuts, each of which also shows the controls. */
  export function usePlayerKeys(keys: PlayerKeys): void {
    const latest = useLatest(keys);
@@ -35,8 +35,8 @@ index 9930381d..288c596b 100644
    const { subtitle } = keys.player.state;
    const lastSubtitle = React.useRef<string | null>(null);
    React.useEffect(() => {
-@@ -165,11 +172,37 @@ export function usePlayerKeys(keys: PlayerKeys): void {
-       if (!k().visible && k().zap?.step) return zapStep(-sign);
+@@ -167,11 +174,37 @@ export function usePlayerKeys(keys: PlayerKeys): void {
+       if (!k().visible() && k().zap?.step) return zapStep(-sign);
        focusControls();
      };
 -    /** The skip button while it shows, else play. */
@@ -74,7 +74,7 @@ index 9930381d..288c596b 100644
          [
            ...(root?.querySelectorAll<HTMLElement>('[data-name=play]') ?? []),
          ].find((el) => el.getClientRects().length);
-@@ -314,6 +347,9 @@ export function usePlayerKeys(keys: PlayerKeys): void {
+@@ -322,6 +355,9 @@ export function usePlayerKeys(keys: PlayerKeys): void {
          else if (!currentHost().back?.()) k().onBack();
        })
      );

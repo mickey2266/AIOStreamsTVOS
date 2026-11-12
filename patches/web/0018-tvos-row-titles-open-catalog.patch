@@ -1,8 +1,8 @@
-diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/components/media-row.tsx
---- a/packages/web/src/components/media-row.tsx
-+++ b/packages/web/src/components/media-row.tsx
-@@ -471,7 +471,9 @@ export function MediaRow({
-     <div className="-me-4 flex items-center justify-between gap-3 pe-4 lg:-me-10">
+diff --git a/packages/web/src/components/media/media-row.tsx b/packages/web/src/components/media/media-row.tsx
+index 240faf33..e5211c41 100644
+--- a/packages/web/src/components/media/media-row.tsx
++++ b/packages/web/src/components/media/media-row.tsx
+@@ -476,7 +476,9 @@ export function MediaRow({
        {title ? (
          <h2
            data-ui="media-row-title"
@@ -14,9 +14,11 @@ diff --git a/packages/web/src/components/media-row.tsx b/packages/web/src/compon
            className="-m-1 min-w-0 truncate p-1 text-lg font-semibold sm:text-xl"
          >
 diff --git a/packages/web/src/lib/input/focus.ts b/packages/web/src/lib/input/focus.ts
+index a1129f09..925216d8 100644
 --- a/packages/web/src/lib/input/focus.ts
 +++ b/packages/web/src/lib/input/focus.ts
-@@ -126,3 +126,32 @@ const ruledOut = (el: HTMLElement) =>
+@@ -125,6 +125,35 @@ const ruledOut = (el: HTMLElement) =>
+     ':disabled, input[type=hidden], [contenteditable=false], [role=tabpanel], [tabindex="-1"]:not([role=tab]):not([role=radio])'
    ) || !!el.closest('[inert], [aria-hidden=true], [data-nav=skip]');
  
 +/**
@@ -49,7 +51,10 @@ diff --git a/packages/web/src/lib/input/focus.ts b/packages/web/src/lib/input/fo
 +}
 +
  /** A focusable standing for its whole card (`data-nav-card`) is measured as its `data-nav-box`. */
-@@ -636,6 +665,7 @@ function first(root: Element): HTMLElement | null {
+ const rectOf = (el: HTMLElement) => {
+   const box = el.hasAttribute('data-nav-card')
+@@ -635,9 +664,10 @@ function first(root: Element): HTMLElement | null {
+   const all = (el: Element) => [...el.querySelectorAll<HTMLElement>(FOCUSABLE)];
    const el =
      all(area).find(
 -      (el) => onScreen(el) && canFocus(el) && !el.closest('nav')
@@ -59,13 +64,20 @@ diff --git a/packages/web/src/lib/input/focus.ts b/packages/web/src/lib/input/fo
 -    all(area).find((el) => onScreen(el) && canFocus(el)) ??
 +    all(area).find((el) => onScreen(el) && canFocus(el) && !inTitle(el)) ??
      all(root).find((el) => canFocus(el));
-@@ -857,3 +887,4 @@ export function move(dir: Direction): boolean {
+   const box = el?.closest<HTMLElement>('[data-nav-enter]');
+   return (box && enterAt(box)) ?? el ?? null;
+@@ -871,7 +901,8 @@ export function move(dir: Direction): boolean {
+   }
+   // Any other way stays in such a box, as what it covers lies beside it.
    const within = exit && !out ? exit : root;
 -  let near = back && canFocus(back) ? back : null;
 +  // Up from a row's cards, its title, even where focus came down from the row above.
 +  let near = titleAbove(from, dir) ?? (back && canFocus(back) ? back : null);
    // A box entered at its named element, as tabs at the picked one, has more of it to pass on the way back.
-@@ -877,4 +908,6 @@ export function move(dir: Direction): boolean {
+   const entered = near && from.closest<HTMLElement>('[data-nav-enter]');
+   if (entered && !entered.contains(near)) {
+@@ -898,7 +929,9 @@ export function move(dir: Direction): boolean {
+     moveTo(start, dir);
      return true;
    }
 -  moveTo(near === back ? near : entry(near, from), dir);
@@ -73,3 +85,5 @@ diff --git a/packages/web/src/lib/input/focus.ts b/packages/web/src/lib/input/fo
 +  // Down into a row from outside it, its title before its cards.
 +  moveTo(titleBelow(to, from, dir) ?? to, dir);
    return true;
+ }
+ 

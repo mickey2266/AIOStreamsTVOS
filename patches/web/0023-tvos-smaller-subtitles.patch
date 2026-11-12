@@ -1,8 +1,8 @@
-diff --git a/packages/web/src/lib/settings.ts b/packages/web/src/lib/settings.ts
-index e2885bff..758e6ba2 100644
---- a/packages/web/src/lib/settings.ts
-+++ b/packages/web/src/lib/settings.ts
-@@ -497,7 +497,8 @@ export type SegmentType = (typeof SEGMENT_TYPES)[number];
+diff --git a/packages/web/src/lib/settings/index.ts b/packages/web/src/lib/settings/index.ts
+index f91a67c9..c1a006a2 100644
+--- a/packages/web/src/lib/settings/index.ts
++++ b/packages/web/src/lib/settings/index.ts
+@@ -140,7 +140,8 @@ export type SegmentType = (typeof SEGMENT_TYPES)[number];
  export const SEGMENT_ACTIONS = ['ask', 'skip', 'none'] as const;
  export type SegmentAction = (typeof SEGMENT_ACTIONS)[number];
  
@@ -13,11 +13,11 @@ index e2885bff..758e6ba2 100644
  /** `default` keeps the player's own font. */
  export const SUBTITLE_FONTS = [
 diff --git a/packages/web/src/lib/subtitles/style.ts b/packages/web/src/lib/subtitles/style.ts
-index f5e4ba01..b4064ad4 100644
+index 46235575..f4e31b8a 100644
 --- a/packages/web/src/lib/subtitles/style.ts
 +++ b/packages/web/src/lib/subtitles/style.ts
 @@ -11,6 +11,8 @@ import {
- } from '../settings';
+ } from '@/lib/settings';
  
  const SCALE: Record<SubtitleSize, number> = {
 +  // As far below Small as Small is below Normal: 0.8 / 1.25 (AIOStreamsTVOS).

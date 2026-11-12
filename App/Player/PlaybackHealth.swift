@@ -70,7 +70,7 @@ struct PlaybackHealth {
     }
 
     /// `position` is where in the video it stalled, in seconds; `softwareRoute` is the engine's software
-    /// player, which keeps a fixed 96 MB ahead in memory whatever the Cache size. `producerSlow` is the
+    /// player, which keeps a fixed 96 MB ahead in memory, not Automatic's 10 minutes. `producerSlow` is the
     /// engine having said its segment producer ran below real time this video (AE#850), and
     /// `objectAudio` the Atmos or DTS:X objects being rendered (the page's Object audio switch).
     mutating func stalled(position: Double?, softwareRoute: Bool, producerSlow: Bool, objectAudio: Bool) {

@@ -1,4 +1,19 @@
+diff --git a/packages/web/src/lib/playback/subtitle-timing.ts b/packages/web/src/lib/playback/subtitle-timing.ts
+index cd1320b7..75f1adb5 100644
+--- a/packages/web/src/lib/playback/subtitle-timing.ts
++++ b/packages/web/src/lib/playback/subtitle-timing.ts
+@@ -269,7 +269,8 @@ export function useSubtitleTiming({
+           cues,
+           SUBTITLE_DELAY_LIMIT_MS,
+           () => playhead.positionMs,
+-          asked
++          asked,
++          (note) => appLog('info', `[sync] ${shown}: ${note}`)
+         );
+         const taker = (lines: Span[]) => take(sync, text, lines);
+         taker(history.lines);
 diff --git a/packages/web/src/lib/subtitles/auto-sync.ts b/packages/web/src/lib/subtitles/auto-sync.ts
+index 6a1c43c6..7129c8a0 100644
 --- a/packages/web/src/lib/subtitles/auto-sync.ts
 +++ b/packages/web/src/lib/subtitles/auto-sync.ts
 @@ -172,7 +172,9 @@ export class SubtitleSync {
@@ -27,16 +42,3 @@ diff --git a/packages/web/src/lib/subtitles/auto-sync.ts b/packages/web/src/lib/
      const last = this.last;
      this.last = found;
      if (!found?.confident) {
-diff --git a/packages/web/src/lib/playback/use-player.ts b/packages/web/src/lib/playback/use-player.ts
---- a/packages/web/src/lib/playback/use-player.ts
-+++ b/packages/web/src/lib/playback/use-player.ts
-@@ -593,7 +593,8 @@ export function usePlayer(
-           cues,
-           SUBTITLE_DELAY_LIMIT_MS,
-           () => playhead.positionMs,
--          asked
-+          asked,
-+          (note) => appLog('info', `[sync] ${shown}: ${note}`)
-         );
-         const taker = (lines: Span[]) => take(sync, text, lines);
-         taker(history.lines);

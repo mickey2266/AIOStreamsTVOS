@@ -1,16 +1,16 @@
-diff --git a/packages/web/src/components/mixed-grid.tsx b/packages/web/src/components/mixed-grid.tsx
-index 2cacc585..6de047bf 100644
---- a/packages/web/src/components/mixed-grid.tsx
-+++ b/packages/web/src/components/mixed-grid.tsx
+diff --git a/packages/web/src/components/media/mixed-grid.tsx b/packages/web/src/components/media/mixed-grid.tsx
+index 178ff497..f987d692 100644
+--- a/packages/web/src/components/media/mixed-grid.tsx
++++ b/packages/web/src/components/media/mixed-grid.tsx
 @@ -1,13 +1,122 @@
 +import React from 'react';
  import { Skeleton } from '@aiostreams/ui/skeleton';
- import type { JellyfinClient } from '../lib/client';
- import { cardImages, cardShape, animatedPosterOf } from '../lib/images';
- import { itemSubtitle, progressOf } from '../lib/format';
- import { href, itemPath } from '../lib/paths';
-+import { ScrollRoot, watch } from '../lib/use-in-view';
- import type { BaseItemDto } from '../lib/types';
+ import type { JellyfinClient } from '@/lib/jellyfin/client';
+ import { cardImages, cardShape, animatedPosterOf } from '@/lib/artwork/urls';
+ import { itemSubtitle, progressOf } from '@/lib/format';
+ import { href, itemPath } from '@/lib/paths';
++import { ScrollRoot, watch } from '@/hooks/use-in-view';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
  import { PosterCard } from './cards';
  import { ItemMenu } from './item-menu';
  import { CardGrid, fadeIn } from './media-row';

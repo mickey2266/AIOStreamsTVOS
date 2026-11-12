@@ -1,0 +1,78 @@
+diff --git a/packages/web/src/app/settings/playback.tsx b/packages/web/src/app/settings/playback.tsx
+index 38fa1d22..e5b7d34a 100644
+--- a/packages/web/src/app/settings/playback.tsx
++++ b/packages/web/src/app/settings/playback.tsx
+@@ -422,6 +422,7 @@ export function PlaybackSection() {
+             onValueChange={setDolbyVision}
+           />
+           {canUpscale() && <UpscalingSwitch />}
++          {appleTv() && <OtherUpscalingSwitch />}
+           {androidTv && (
+             <Switch
+               side="right"
+@@ -527,6 +528,23 @@ function UpscalingSwitch() {
+   );
+ }
+ 
++/**
++ * The Apple TV app's upscaling of everything else (`settings.video.upscalingOther`, AIOStreamsTVOS).
++ * In English only, as the help above.
++ */
++function OtherUpscalingSwitch() {
++  const [other, setOther] = useSetting(settings.video.upscalingOther);
++  return (
++    <Switch
++      side="right"
++      label="Upscale other video"
++      help="Upscales films and shows that aren't anime the same way, below 1080p, from tvOS 26: older and lower-resolution videos look sharper, though faces and fine detail can look smoothed. HDR and Dolby Vision videos, videos about as large as the screen, live channels and trailers stay as they are. Switching it during a video reopens the video where it is."
++      value={other}
++      onValueChange={setOther}
++    />
++  );
++}
++
+ function PlayerCard() {
+   const [player, setPlayer] = useSetting(settings.player.choice);
+   const [link, setLink] = useSetting(settings.player.link);
+diff --git a/packages/web/src/lib/playback/upscaling.ts b/packages/web/src/lib/playback/upscaling.ts
+index ef569e86..b0d4a5fd 100644
+--- a/packages/web/src/lib/playback/upscaling.ts
++++ b/packages/web/src/lib/playback/upscaling.ts
+@@ -1,6 +1,7 @@
+ import React from 'react';
+ import { useItem } from '@/lib/jellyfin/queries';
+ import { settings } from '@/lib/settings';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
+ 
+ // eslint-disable-next-line lingui/no-unlocalized-strings -- Jellyfin's names
+@@ -23,8 +24,15 @@ export function onUpscalingChange(listener: () => void): () => void {
+   return () => listeners.delete(listener);
+ }
+ 
++/**
++ * The Apple TV app also has a setting of its own for what isn't anime, which its player upscales with
++ * the Apple TV's super resolution (AIOStreamsTVOS). Everywhere else only anime is upscaled.
++ */
+ export const upscalingOn = () =>
+-  picked ?? (anime && settings.video.upscaling.read());
++  picked ??
++  (anime
++    ? settings.video.upscaling.read()
++    : appleTv() && settings.video.upscalingOther.read());
+ 
+ export function pickUpscaling(on: boolean): void {
+   picked = on;
+diff --git a/packages/web/src/lib/settings/index.ts b/packages/web/src/lib/settings/index.ts
+index c1a006a2..4801b39d 100644
+--- a/packages/web/src/lib/settings/index.ts
++++ b/packages/web/src/lib/settings/index.ts
+@@ -637,6 +637,8 @@ export const settings = {
+       ['aiostreams-android-tunneling']
+     ),
+     upscaling: device<boolean>('aiostreams-web-video-upscaling', false),
++    /** The Apple TV app's upscaling of everything that isn't anime (AIOStreamsTVOS). */
++    upscalingOther: device<boolean>('aiostreams-web-video-upscaling-other', false),
+     hdrOutput: device<boolean>('aiostreams-web-video-hdr-output', false),
+   },
+   audio: {

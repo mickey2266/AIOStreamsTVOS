@@ -11,6 +11,8 @@ import UIKit
 final class MainViewController: UIViewController, RemoteReceiver {
     private let videoView = AetherPlayerView(frame: .zero)
     private let subtitleView = SubtitleOverlay(frame: .zero)
+    /// The two above, full screen or where the page's mini player and trailer previews put them.
+    private lazy var stage = VideoStage(video: videoView, subtitles: subtitleView)
     private var web: AIOWebView?
     private let status = UILabel()
     private var engine: AetherPlayer?
@@ -32,13 +34,15 @@ final class MainViewController: UIViewController, RemoteReceiver {
         AppFolders.create()
 
         for pane in [videoView, subtitleView] as [UIView] {
-            pane.frame = view.bounds
-            pane.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             pane.isHidden = true
             pane.isUserInteractionEnabled = false
-            view.addSubview(pane)
         }
         videoView.backgroundColor = .black
+        // Both on one stage, which the page can draw small (`player-frame`, VideoStage).
+        stage.view.frame = view.bounds
+        stage.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(stage.view)
+        stage.pictureInPicture = { [weak self] in self?.pip?.active == true }
 
         status.frame = view.bounds.insetBy(dx: 160, dy: 160)
         status.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -56,6 +60,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
         view.addSubview(web)
         view.addSubview(status)
         self.web = web
+        stage.web = web
         guard web.available else {
             return showStatus("This version of tvOS has no web engine the app can use.")
         }
@@ -146,6 +151,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             version: "\(Identity.version)-tvos",
             device: Identity.device,
             deviceId: Identity.deviceId,
+            hours24: Identity.hours24,
             storage: storage.json
         ))
         let ours = url.flatMap { $0.scheme?.lowercased() == WebApp.scheme ? $0 : nil }
@@ -157,14 +163,18 @@ final class MainViewController: UIViewController, RemoteReceiver {
     private var pageEnds: [Date] = []
     /// An end this soon after the last one counts as the page failing as it loads.
     private static let quickEnd: TimeInterval = 30
+    /// How long a third quick end in a row waits before loading home again.
+    private static let retryDelay: TimeInterval = 5
 
     /**
      * The page's process ended. It loads again where it was; ended again within `quickEnd`, it
      * loads at the start, as the page it was on may be what takes it to its limit as it loads (a
-     * Jetsam report showed 13 ends in 26 s). A third quick end in a row stops reloading, and the
-     * app menu's Reload starts it again.
+     * Jetsam report showed 13 ends in 26 s). A third quick end in a row waits `retryDelay` and
+     * loads home again, so the reloads don't come back to back. None of these show a notice.
      */
     private func pageEnded(at url: URL?, reason: AIOPageEnd) {
+        // The page that set a frame is gone: the video fills the screen and the page is whole again.
+        stage.place(nil)
         let now = Date()
         pageEnds = pageEnds.filter { now.timeIntervalSince($0) < 10 * Self.quickEnd } + [now]
         var quick = 0
@@ -176,18 +186,18 @@ final class MainViewController: UIViewController, RemoteReceiver {
             u.path + (u.query.map { "?\($0)" } ?? "") + (u.fragment.map { "#\($0)" } ?? "")
         }
         MemoryLog.pageEnded(playing: player?.playing == true, reason: reason, at: place)
-        let cause = reason.rawValue == 0 ? "ran out of memory" : "stopped (\(MemoryLog.cause(reason)))"
+        // No notice: the end and its cause go to the memory log, which the app's log share carries.
         switch quick {
         case 0:
             loadPage(at: url)
-            flashStatus("The page \(cause) and reloaded.")
         case 1:
             loadPage()
-            flashStatus("The page \(cause) again as it loaded, so it started over at home.")
         default:
+            // Still ending as it loads at home: wait a moment, so tvOS can free memory, and try home again.
             pageEnds = []
-            showStatus("The page \(cause) again as it loaded, even at home, so it wasn't reloaded.\n\n"
-                + "Hold Play/Pause for options, then Reload.")
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.retryDelay) { [weak self] in
+                self?.loadPage()
+            }
         }
     }
 
@@ -252,6 +262,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
             pip.ended = { [weak self] in
                 self?.web?.focusPage()
                 self?.updatePipButton()
+                // A frame the page set meanwhile shows again, with its hole.
+                self?.stage.refresh()
             }
             player.onStopped = { [weak pip] in pip?.stop() }
             // The engine's AVPlayer layer is there once a video has loaded.
@@ -326,12 +338,6 @@ final class MainViewController: UIViewController, RemoteReceiver {
         lines += AppAnswers.videoLines(player: engine, window: view.window)
         lines.append("")
         lines += MemoryLog.report
-        lines.append("")
-        lines += PictureInPicture.report
-        lines.append("")
-        lines += TopShelf.report
-        lines.append("")
-        lines += KeyboardReport.lines
         let held = AetherPlayer.heldSourceConnection
         let priming = AudioOutput.primerEnabled
         let report = lines.joined(separator: "\n")
@@ -491,12 +497,18 @@ final class MainViewController: UIViewController, RemoteReceiver {
         case "hello":
             connected = true
             status.isHidden = true
+            // A page that loaded again knows nothing of a frame the last one set.
+            stage.place(nil)
             web?.focusPage()
             pipButtonShown = false
             updatePipButton()
         case "tvos-pip":
             // The player's picture-in-picture button, which the bridge script adds.
             pip?.start()
+        case "player-frame":
+            // The page's mini player docked in a preview, or a trailer playing by itself in a card, the hero
+            // or a title page: the video in that box, or the whole screen again for none (VideoStage).
+            stage.place(VideoFrame.from(message, webWidth: web?.bounds.width ?? view.bounds.width))
         case "app-info":
             sendToPage(AppAnswers.appInfo())
         case "log":

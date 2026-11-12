@@ -1,4 +1,5 @@
 diff --git a/packages/web/src/lib/input/glide.ts b/packages/web/src/lib/input/glide.ts
+index ad5ed282..5ac94525 100644
 --- a/packages/web/src/lib/input/glide.ts
 +++ b/packages/web/src/lib/input/glide.ts
 @@ -120,6 +120,9 @@ function drawnShift(outer: HTMLElement): [number, number] {

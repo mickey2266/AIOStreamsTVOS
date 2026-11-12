@@ -27,11 +27,17 @@ enum LiveHLS {
         let reason: String
     }
 
+    /// The load waits for the check, so each request gets `longest` in all, redirects included, rather
+    /// than 6 s for each wait between bytes (a master playlist's variant is a second request). One that
+    /// runs out is "not live", as an unread one always was: a live HLS that AVPlayer then gives up on
+    /// is loaded again as live (`AetherPlayer.failed`).
     private static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 6
+        config.timeoutIntervalForRequest = longest
+        config.timeoutIntervalForResource = longest
         return URLSession(configuration: config)
     }()
+    static let longest: TimeInterval = 3
 
     /// The largest playlist read; a live window is a few kilobytes.
     private static let maxBytes = 2 * 1024 * 1024
@@ -51,7 +57,21 @@ enum LiveHLS {
      * `.ts` isn't one of them, as an IPTV channel is often raw MPEG-TS at such an address.
      */
     static func mayBePlaylist(_ url: URL) -> Bool {
-        !fileExtensions.contains(url.pathExtension.lowercased())
+        !fileExtensions.contains(url.pathExtension.lowercased()) && !isServerFile(url)
+    }
+
+    /**
+     * The server's own stream route for a file it holds, `/Videos/<id>/stream?static=true`, which the
+     * page plays a server-side file from (`streamUrl` in the web app's `lib/playback/stream.ts`). It
+     * has no extension, so every one paid for the check, but `static` sends the file as it is, and a
+     * live source comes flagged by the server (`IsInfiniteStream`), which the page sends as `live`.
+     */
+    static func isServerFile(_ url: URL) -> Bool {
+        let parts = url.pathComponents.map { $0.lowercased() }
+        guard parts.count >= 3, parts[parts.count - 3] == "videos",
+              parts[parts.count - 1] == "stream" || parts[parts.count - 1].hasPrefix("stream.") else { return false }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        return query.contains { $0.name.lowercased() == "static" && $0.value?.lowercased() == "true" }
     }
 
     private static let fileExtensions: Set<String> = [

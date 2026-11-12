@@ -291,6 +291,15 @@ enum EngineLogBook {
     private static var subtitles: [String] = []
     private static let keptSubtitles = 30
 
+    /**
+     * The upscaling stage's lines, kept apart for the same reason: the route it took or why not (`[Upscale]
+     * taken:` / `not taken (...)`), its timing per stage against the frame budget, and a dropped MetalFX or a
+     * disable. They said nothing in the audio and loading lines, which the memprobe fills every 30 s.
+     */
+    private static let upscaleWords = ["[upscale]", "[player] upscaling"]
+    private static var upscaling: [String] = []
+    private static let keptUpscaling = 40
+
     /// Every 30 s, so they'd fill the audio lines on their own; they say nothing a stall needs.
     private static let noiseWords = ["bed levels"]
 
@@ -304,6 +313,7 @@ enum EngineLogBook {
                 producerSlowAt = Date()
                 lock.unlock()
             }
+            if upscaleWords.contains(where: { lower.contains($0) }) { keepUpscaling(line) }
             if subtitleWords.contains(where: { lower.contains($0) }) {
                 keepSubtitle(line)
             } else if lower.contains("memprobe"), let tail = line.range(of: "subCues=") {
@@ -321,7 +331,21 @@ enum EngineLogBook {
     /// The app's own line, beside the engine's, for the app menu; its subtitle lines with the engine's.
     static func note(_ line: String) {
         NSLog("%@", line)
+        if line.hasPrefix("[player] upscaling") { keepUpscaling(line) }
         if line.hasPrefix("[subtitles]") { keepSubtitle(line) } else { keep(line) }
+    }
+
+    private static func keepUpscaling(_ line: String) {
+        lock.lock()
+        upscaling.append(String(line.prefix(500)))
+        if upscaling.count > keptUpscaling { upscaling.removeFirst(upscaling.count - keptUpscaling) }
+        lock.unlock()
+    }
+
+    static var recentUpscaling: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return upscaling
     }
 
     private static func keepSubtitle(_ line: String) {

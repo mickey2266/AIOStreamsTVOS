@@ -19,9 +19,10 @@ permissions:
 env:
   UPSTREAM: https://github.com/Viren070/AIOStreams.git
   # The Android app section (AndroidSection and what it shows) and the list of settings sections.
+  # Upstream moved them from pages/settings/ (apps.tsx, index.tsx) to app/settings/ in 845dbd53.
   WATCHED: >-
-    packages/web/src/pages/settings/apps.tsx
-    packages/web/src/pages/settings/index.tsx
+    packages/web/src/app/settings/apps.tsx
+    packages/web/src/app/settings/page.tsx
   LABEL: upstream-settings
   TITLE: Upstream changed the Android app settings
 

@@ -2,7 +2,7 @@ import UIKit
 
 /**
  * The app's own menu (hold Play/Pause): what the app knows about the video,
- * its memory and the Top Shelf, in a panel the remote scrolls, beside the
+ * and its memory, in a panel the remote scrolls, beside the
  * menu's actions. An action sheet cuts off a message it can't fit, so this is
  * a screen of its own. Menu closes it, as it does an action sheet.
  */

@@ -1,4 +1,5 @@
 diff --git a/packages/web/src/lib/playback/player-choice.ts b/packages/web/src/lib/playback/player-choice.ts
+index bb04c8a4..f6720c73 100644
 --- a/packages/web/src/lib/playback/player-choice.ts
 +++ b/packages/web/src/lib/playback/player-choice.ts
 @@ -68,8 +68,10 @@ export const LINK_PLAYERS: readonly {

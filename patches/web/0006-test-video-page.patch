@@ -1,59 +1,33 @@
-diff --git a/packages/web/src/lib/app-links.ts b/packages/web/src/lib/app-links.ts
-index 94579d10..6bd5be9a 100644
---- a/packages/web/src/lib/app-links.ts
-+++ b/packages/web/src/lib/app-links.ts
-@@ -76,6 +76,11 @@ export function parseAppLink(raw: string): AppLink | null {
-     }
-     case 'search':
-       return { kind: 'route', path: to.search(param(query, 'q') ?? undefined) };
-+    // The Apple TV app's test video, a bare link played in the player.
-+    case 'test-video': {
-+      const url = param(query, 'url');
-+      return isAddress(url) ? { kind: 'route', path: to.testVideo(url) } : null;
-+    }
-     case 'party': {
-       const invite = parseInvite(raw);
-       return invite ? { kind: 'party', invite } : null;
-diff --git a/packages/web/src/lib/paths.ts b/packages/web/src/lib/paths.ts
-index 104d6658..21eca828 100644
---- a/packages/web/src/lib/paths.ts
-+++ b/packages/web/src/lib/paths.ts
-@@ -35,6 +35,8 @@ export const to = {
-     `/play/${itemId}?source=${sourceId}${startMs ? `&start=${Math.round(startMs)}` : ''}${playlist ? `&playlist=${playlist}` : ''}`,
-   trailer: (itemId: string, index = 0) =>
-     `/play/trailer/${itemId}${index ? `?trailer=${index}` : ''}`,
-+  testVideo: (url: string) =>
-+    `/play/test-video?url=${encodeURIComponent(url)}`,
- };
- 
- /** An episode has no page of its own; it opens its show at its season. */
-diff --git a/packages/web/src/pages/test-video.tsx b/packages/web/src/pages/test-video.tsx
+diff --git a/packages/web/src/app/test-video/page.tsx b/packages/web/src/app/test-video/page.tsx
 new file mode 100644
-index 00000000..98f7361a
+index 00000000..eddd365e
 --- /dev/null
-+++ b/packages/web/src/pages/test-video.tsx
-@@ -0,0 +1,162 @@
++++ b/packages/web/src/app/test-video/page.tsx
+@@ -0,0 +1,165 @@
 +import { t } from '@lingui/core/macro';
 +import { Trans } from '@lingui/react/macro';
 +import React from 'react';
 +import { BiArrowBack } from 'react-icons/bi';
 +import { Button } from '@aiostreams/ui/button';
 +import { cn } from '@aiostreams/ui/core/styling';
-+import { useSession } from '../lib/session';
-+import { currentHost } from '../lib/hosts';
-+import { usePlayerFullscreen } from '../lib/playback/fullscreen';
-+import { usePlayer } from '../lib/playback/use-player';
-+import { videoEngine } from '../lib/playback/video';
-+import { useNowPlaying } from '../lib/playback/now-playing';
-+import { useAction } from '../lib/input';
-+import { settings, useSetting } from '../lib/settings';
-+import { usePlaybackPrefs, type PlaybackPrefs } from '../lib/user-config';
-+import { goBack, to } from '../lib/paths';
-+import { closePlayback } from '../lib/playback/session';
-+import type { BaseItemDto, SourceInfo } from '../lib/types';
-+import { PlayerControls } from '../components/player/controls';
-+import { Cover } from '../components/player/cover';
-+import { OBJECT_FIT, usePlayerPage } from './player';
++import { useSession } from '@/lib/jellyfin/session';
++import { currentHost } from '@/lib/hosts';
++import { usePlayerFullscreen } from '@/lib/playback/fullscreen';
++import { usePlayer } from '@/lib/playback/use-player';
++import { videoEngine } from '@/lib/playback/video';
++import { useNowPlaying } from '@/lib/playback/now-playing';
++import { useAction } from '@/lib/input';
++import { settings, useSetting } from '@/lib/settings';
++import {
++  usePlaybackPrefs,
++  type PlaybackPrefs,
++} from '@/lib/jellyfin/user-config';
++import { goBack, to } from '@/lib/paths';
++import { closePlayback } from '@/lib/playback/session';
++import type { BaseItemDto, SourceInfo } from '@/lib/jellyfin/types';
++import { PlayerControls } from '@/features/player/controls';
++import { Cover } from '@/features/player/cover';
++import { OBJECT_FIT, usePlayerPage } from '@/app/player/page';
 +
 +/*
 + * A video from a bare http(s) link in the full player, for the Apple TV app's
@@ -195,19 +169,48 @@ index 00000000..98f7361a
 +    </div>
 +  );
 +}
+diff --git a/packages/web/src/lib/app-links.ts b/packages/web/src/lib/app-links.ts
+index 94579d10..6bd5be9a 100644
+--- a/packages/web/src/lib/app-links.ts
++++ b/packages/web/src/lib/app-links.ts
+@@ -76,6 +76,11 @@ export function parseAppLink(raw: string): AppLink | null {
+     }
+     case 'search':
+       return { kind: 'route', path: to.search(param(query, 'q') ?? undefined) };
++    // The Apple TV app's test video, a bare link played in the player.
++    case 'test-video': {
++      const url = param(query, 'url');
++      return isAddress(url) ? { kind: 'route', path: to.testVideo(url) } : null;
++    }
+     case 'party': {
+       const invite = parseInvite(raw);
+       return invite ? { kind: 'party', invite } : null;
+diff --git a/packages/web/src/lib/paths.ts b/packages/web/src/lib/paths.ts
+index 822ae24c..3cbaa9ff 100644
+--- a/packages/web/src/lib/paths.ts
++++ b/packages/web/src/lib/paths.ts
+@@ -43,6 +43,8 @@ export const to = {
+     `/play/${itemId}?source=${sourceId}${startMs ? `&start=${Math.round(startMs)}` : ''}${playlist ? `&playlist=${playlist}` : ''}`,
+   trailer: (itemId: string, index = 0) =>
+     `/play/trailer/${itemId}${index ? `?trailer=${index}` : ''}`,
++  testVideo: (url: string) =>
++    `/play/test-video?url=${encodeURIComponent(url)}`,
+ };
+ 
+ /** An episode has no page of its own; it opens its show at its season. */
 diff --git a/packages/web/src/router.tsx b/packages/web/src/router.tsx
-index 5a9f72f7..e7964ab1 100644
+index e93e049e..2d1e6ad3 100644
 --- a/packages/web/src/router.tsx
 +++ b/packages/web/src/router.tsx
-@@ -21,6 +21,7 @@ import { HistoryPage } from './pages/history';
- import { DownloadsPage } from './pages/downloads';
+@@ -25,6 +25,7 @@ import { DownloadsPage } from './app/downloads/page';
  import { openPlayback } from './lib/playback/session';
- import { TrailerPage } from './pages/trailer';
-+import { TestVideoPage } from './pages/test-video';
+ import { endNowPlaying } from './lib/playback/now-playing';
+ import { TrailerPage } from './app/trailer/page';
++import { TestVideoPage } from './app/test-video/page';
  import { Button } from '@aiostreams/ui/button';
  import { LuffyError } from '@aiostreams/ui/shared/luffy-error';
- import { SettingsPage } from './pages/settings';
-@@ -208,6 +209,23 @@ const trailerRoute = createRoute({
+ import { SettingsPage } from './app/settings/page';
+@@ -227,6 +228,23 @@ const trailerRoute = createRoute({
    component: TrailerRouteView,
  });
  
@@ -231,7 +234,7 @@ index 5a9f72f7..e7964ab1 100644
  function TrailerRouteView(): React.ReactElement {
    const { itemId } = trailerRoute.useParams();
    const { trailer } = trailerRoute.useSearch();
-@@ -242,6 +260,7 @@ const routeTree = rootRoute.addChildren([
+@@ -264,6 +282,7 @@ const routeTree = rootRoute.addChildren([
      personRoute,
      playRoute,
      trailerRoute,

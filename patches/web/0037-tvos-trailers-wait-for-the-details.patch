@@ -1,0 +1,16 @@
+diff --git a/packages/web/src/features/trailers/preview.tsx b/packages/web/src/features/trailers/preview.tsx
+index 4daab21e..78721b92 100644
+--- a/packages/web/src/features/trailers/preview.tsx
++++ b/packages/web/src/features/trailers/preview.tsx
+@@ -261,7 +261,10 @@ export interface TrailerPreviewProps {
+ export function TrailerPreview(props: TrailerPreviewProps) {
+   const { item, spot, full = false } = props;
+   const details = useItem(item.Id ?? '');
+-  const known = details.data ?? (item.RemoteTrailers ? item : undefined);
++  // A row's copy of the title can list no trailers where its details do (the home page hero's do):
++  // only a list with some in it stands in until the details come (AIOStreamsTVOS).
++  const known =
++    details.data ?? (item.RemoteTrailers?.length ? item : undefined);
+   const trailers = React.useMemo(
+     () => (known ? trailersOf(known) : []),
+     [known]

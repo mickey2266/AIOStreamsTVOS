@@ -1,0 +1,49 @@
+diff --git a/packages/web/src/features/player/next-episode.tsx b/packages/web/src/features/player/next-episode.tsx
+index 3e09df3c..0c9d1e24 100644
+--- a/packages/web/src/features/player/next-episode.tsx
++++ b/packages/web/src/features/player/next-episode.tsx
+@@ -5,6 +5,7 @@ import { toast } from 'sonner';
+ import { useQueryClient } from '@tanstack/react-query';
+ import { useSession } from '@/lib/jellyfin/session';
+ import { currentHost } from '@/lib/hosts';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import { usePlaybackInfoOptions } from '@/lib/jellyfin/playback-info';
+ import { usePlaylistName, useUpNext, type UpNext } from '@/lib/playlists';
+ import type { PartyNeighbours } from '@/lib/party/follow';
+@@ -355,7 +356,12 @@ export function useUpNextPrompt({
+ 
+   // A player with a playlist of its own gets what plays next once this plays.
+   const queueNext = useLatest(player.queueNext);
+-  const queues = !!player.queueNext && player.state.started;
++  const queues =
++    !!player.queueNext &&
++    player.state.started &&
++    // The Apple TV app only warms what's next, from when the countdown to it comes up; dismissed,
++    // the warm is dropped (AIOStreamsTVOS).
++    (!appleTv() || shown);
+   const canQueue = queues && autoplay && !asksFirst(stillWatching);
+   React.useEffect(() => {
+     if (!queues) return;
+diff --git a/packages/web/src/lib/hosts/shell/player.ts b/packages/web/src/lib/hosts/shell/player.ts
+index 851d93f0..e5ed8b75 100644
+--- a/packages/web/src/lib/hosts/shell/player.ts
++++ b/packages/web/src/lib/hosts/shell/player.ts
+@@ -456,7 +456,17 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
+           if (next) load(next, true);
+           else send('player-unqueue');
+         }
+-      : undefined,
++      : appleTv()
++        ? // The Apple TV app plays in the page, which loads what plays next itself once this ends.
++          // Told it once the countdown to it comes up (next-episode.tsx), the app fetches its first
++          // bytes then, so it opens without waiting for them; nothing named drops the fetch
++          // (AIOStreamsTVOS).
++          (next) =>
++            send(
++              'player-warm',
++              next ? { url: next.url, headers: next.headers } : {}
++            )
++        : undefined,
+   };
+ };
+ 

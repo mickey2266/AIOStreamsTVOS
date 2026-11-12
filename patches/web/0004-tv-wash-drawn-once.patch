@@ -1,3 +1,51 @@
+diff --git a/packages/web/src/app/item/_components/backdrop.tsx b/packages/web/src/app/item/_components/backdrop.tsx
+index dba75cfb..897a6f56 100644
+--- a/packages/web/src/app/item/_components/backdrop.tsx
++++ b/packages/web/src/app/item/_components/backdrop.tsx
+@@ -2,6 +2,8 @@ import React from 'react';
+ import { cn } from '@aiostreams/ui/core/styling';
+ import { BackdropFrame } from '@/components/media/hero';
+ import { CachedImage } from '@/components/cached-image';
++import { DrawnWash } from '@/components/drawn-wash';
++import { currentHost } from '@/lib/hosts';
+ 
+ /** Art that arrives within this was never seen missing, so it just appears. */
+ const UNSEEN_MS = 250;
+@@ -38,7 +40,33 @@ export function Backdrop({
+     },
+     [src]
+   );
+-  const image = src && (
++  const fail = () =>
++    setFailed((f) => ({
++      key,
++      count: (f.key === key ? f.count : 0) + 1,
++    }));
++  const image = src && wash && currentHost().tv ? (
++    // A CSS blur is drawn again on each frame the page scrolls, which a TV can't keep up with.
++    <DrawnWash
++      key={src}
++      data-ui="item-backdrop-image"
++      data-wash
++      src={src}
++      onLoad={() =>
++        setArrived((was) =>
++          was?.src === src
++            ? was
++            : { src, late: performance.now() - opened > UNSEEN_MS }
++        )
++      }
++      onError={fail}
++      className={cn(
++        'absolute inset-0 h-full w-full scale-125 object-cover',
++        loaded && arrived.late && 'transition-opacity duration-700',
++        loaded ? 'opacity-50' : 'opacity-0'
++      )}
++    />
++  ) : src && (
+     <CachedImage
+       key={src}
+       ref={held}
 diff --git a/packages/web/src/components/drawn-wash.tsx b/packages/web/src/components/drawn-wash.tsx
 new file mode 100644
 index 00000000..98858f85
@@ -65,50 +113,3 @@ index 00000000..98858f85
 +    />
 +  );
 +}
-diff --git a/packages/web/src/pages/item.tsx b/packages/web/src/pages/item.tsx
-index b8786c2f..b3a6fdf1 100644
---- a/packages/web/src/pages/item.tsx
-+++ b/packages/web/src/pages/item.tsx
-@@ -110,6 +110,7 @@ import {
-   useDialogStart,
- } from '../lib/input';
- import { CachedImage } from '../components/cached-image';
-+import { DrawnWash } from '../components/drawn-wash';
- import { TrailerButton } from '../components/trailers';
- import { trailersOf } from '../lib/playback/trailers';
- import { openPartySheet } from '../components/party/party-sheet';
-@@ -244,7 +245,33 @@ function Backdrop({
-     },
-     [src]
-   );
--  const image = src && (
-+  const fail = () =>
-+    setFailed((f) => ({
-+      key,
-+      count: (f.key === key ? f.count : 0) + 1,
-+    }));
-+  const image = src && wash && currentHost().tv ? (
-+    // A CSS blur is drawn again on each frame the page scrolls, which a TV can't keep up with.
-+    <DrawnWash
-+      key={src}
-+      data-ui="item-backdrop-image"
-+      data-wash
-+      src={src}
-+      onLoad={() =>
-+        setArrived((was) =>
-+          was?.src === src
-+            ? was
-+            : { src, late: performance.now() - opened > UNSEEN_MS }
-+        )
-+      }
-+      onError={fail}
-+      className={cn(
-+        'absolute inset-0 h-full w-full scale-125 object-cover',
-+        loaded && arrived.late && 'transition-opacity duration-700',
-+        loaded ? 'opacity-50' : 'opacity-0'
-+      )}
-+    />
-+  ) : src && (
-     <CachedImage
-       key={src}
-       ref={held}

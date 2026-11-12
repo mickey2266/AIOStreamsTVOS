@@ -12,11 +12,12 @@ import Foundation
  */
 enum BridgeScript {
     /// `storage` is the app's copy of localStorage by origin, as JSON.
-    static func make(version: String, device: String, deviceId: String, storage: String) -> String {
+    static func make(version: String, device: String, deviceId: String, hours24: Bool, storage: String) -> String {
         template
             .replacingOccurrences(of: "__VERSION__", with: literal(version))
             .replacingOccurrences(of: "__DEVICE__", with: literal(device))
             .replacingOccurrences(of: "__DEVICE_ID__", with: literal(deviceId))
+            .replacingOccurrences(of: "__HOURS24__", with: hours24 ? "true" : "false")
             .replacingOccurrences(of: "__STORAGE__", with: storage)
     }
 
@@ -158,12 +159,18 @@ enum BridgeScript {
     const SPOILERS =
       "[data-ui='artwork'],[data-ui='episode-title']>span,p[data-ui='episode-title']," +
       "[data-ui='episode-synopsis'],[data-ui='wide-card-subtitle']";
+    /*
+     * A trailer playing by itself in the hero or behind a title page shows through a hole the page
+     * cuts in its background with a mask (upstream's `useVideoHole`, features/trailers/preview.tsx),
+     * set only while it plays. Stripped, the background covers the app's video: sound, black picture.
+     */
+    const HOLE = "[data-ui='page-background']";
     if (!EFFECTS)
       rules.push(
         'html:not([data-blur-spoilers]) *,html[data-blur-spoilers] *:not(' + SPOILERS + '),' +
           '*::before,*::after{filter:none!important}',
-        '*,*::before,*::after{-webkit-backdrop-filter:none!important;' +
-          'backdrop-filter:none!important;-webkit-mask-image:none!important;mask-image:none!important}'
+        '*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}',
+        '*:not(' + HOLE + '),*::before,*::after{-webkit-mask-image:none!important;mask-image:none!important}'
       );
     if (rules.length) {
       const style = document.createElement('style');
@@ -302,7 +309,48 @@ enum BridgeScript {
   } catch {}
 
   const listeners = new Set();
-  const send = (message) => handler.postMessage(JSON.stringify(message));
+  const post = (message) => handler.postMessage(JSON.stringify(message));
+  /*
+   * A `player-frame` is in the page's pixels times its viewport scale (the page's `unzoomed`). The page
+   * asks a TV for a 1280-wide viewport, and whether WebKit scales that up to the screen is WebKit's to
+   * say, so the page's width in the same measure goes with it: the app maps the frame by the web
+   * view's width over this, whatever the page's scale (VideoStage).
+   */
+  /*
+   * A trailer that plays by itself in a card, the hero or a title page loads in one of the page's
+   * effects and is framed in the next, in the same turn. A load is held to the end of its turn, with
+   * whatever follows it in that turn, in order, and goes out marked `framed` when the page has a frame
+   * set by then: the app keeps the TV's mode for it rather than blanking to match a muted preview
+   * (`LoadRequest.framed`).
+   */
+  // Not `held`: that name is the held remote key's, above, and a second `let` of it is a syntax
+  // error that stops this whole script, and with it the page's storage, TV layout and remote.
+  let framed = false;
+  let heldMessages = null;
+  const flush = () => {
+    const messages = heldMessages;
+    heldMessages = null;
+    if (framed) messages[0] = { ...messages[0], framed: true };
+    for (const message of messages) post(message);
+  };
+  const send = (message) => {
+    if (message && message.type === 'player-frame') {
+      framed = !!message.frame;
+      if (message.frame) {
+        try {
+          const scale = (window.visualViewport && window.visualViewport.scale) || 1;
+          message = { ...message, pageWidth: window.innerWidth * scale };
+        } catch {}
+      }
+    }
+    if (heldMessages) return void heldMessages.push(message);
+    if (message && message.type === 'player-load') {
+      heldMessages = [message];
+      queueMicrotask(flush);
+      return;
+    }
+    post(message);
+  };
 
   /*
    * tvOS can drop a web view's stored data between launches, and with it the
@@ -371,10 +419,17 @@ enum BridgeScript {
     // The page hides its player while the picture-in-picture window shows; the app's button in the
     // player starts the window (PictureInPicture.swift).
     pip: true,
+    // The app draws its video small where the page says (`player-frame`, VideoStage.swift): the
+    // page's mini player docked in a preview, and trailers that play by themselves in cards, the
+    // hero and title pages, which the page starts only where the player can be placed so.
+    miniPlayer: true,
     // Hides the Android settings this app can't honour (patches/web/0007): the Android app section
     // (updates, picture-in-picture, background play, mpv.conf), the engine, tunneling, frame-rate
     // matching (tvOS's own Match Content) and passthrough.
     appleTv: true,
+    // The system's 12- or 24-hour clock, for the page's Time format on Automatic (the player's clock,
+    // the TV guide), as the Android app sends it.
+    hours24: __HOURS24__,
     device: __DEVICE__,
     deviceId: __DEVICE_ID__,
     send,
@@ -857,8 +912,26 @@ enum BridgeScript {
     const canvases = document.getElementsByTagName('canvas');
     for (const c of canvases) canvasBytes += c.width * c.height * 4;
     const mb = (bytes) => Math.round(bytes / 1048576);
+    /*
+     * What the page's artwork workers are doing (the web app's lib/artwork.ts,
+     * patch 0027). Their decodes happen inside the page's process but are in
+     * none of the counts above, so a kill with few pictures may be theirs.
+     */
+    let art = {};
+    try {
+      art = (window.__aioArtworkStats && window.__aioArtworkStats()) || {};
+    } catch {}
     return {
       type: 'tvos-page-stats',
+      artWorkers: art.workers || 0,
+      artQueued: art.queued || 0,
+      artRunning: art.running || 0,
+      artSlow: art.slow || 0,
+      artPeak: art.peakRunning || 0,
+      artKept: art.kept || 0,
+      artKeptMB: art.keptMB || 0,
+      layers: document.querySelectorAll('[data-glide-layer]').length,
+      episodes: document.querySelectorAll('[data-ui="episode-card"],[data-ui="episode-list-item"]').length,
       path: location.pathname + location.search + location.hash,
       pictures,
       pictureMB: mb(pictureBytes),

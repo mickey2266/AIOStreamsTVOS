@@ -16,6 +16,13 @@ enum Identity {
 
     static let device = UIDevice.current.name.isEmpty ? "Apple TV" : UIDevice.current.name
 
+    /// The system's clock is 24-hour: the hour the region (and a 24-hour choice over it) writes has no
+    /// AM/PM marker. Read as each page loads, for the page's Time format on Automatic (`hours24`).
+    static var hours24: Bool {
+        let format = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current) ?? ""
+        return !format.contains("a")
+    }
+
     /// Ends in "iPad" so the web app offers the iOS players (Infuse, VLC) for external playback.
     static var userAgent: String {
         let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
@@ -157,6 +164,14 @@ enum MemoryLog {
         if int("canvases") > 0 { text += ", canvases \(int("canvasMB")) MB in \(int("canvases"))" }
         if int("videos") > 0 { text += ", \(int("videos")) videos" }
         text += ", \(int("cards")) cards, \(int("elements")) elements"
+        if int("episodes") > 0 { text += ", \(int("episodes")) episodes" }
+        if int("layers") > 0 { text += ", \(int("layers")) glide layers" }
+        // The artwork workers decode inside the page's process, outside the picture counts above.
+        if int("artWorkers") > 0 {
+            text += ", artwork workers \(int("artWorkers")): \(int("artRunning")) running"
+            text += " (\(int("artSlow")) slow, most \(int("artPeak"))), \(int("artQueued")) queued"
+            text += ", \(int("artKeptMB")) MB kept in \(int("artKept"))"
+        }
         lastStats = text
     }
 
@@ -251,6 +266,12 @@ enum AppAnswers {
             lines.append("Engine's audio and loading log, newest last:")
             lines += audio
         }
+        let upscaling = EngineLogBook.recentUpscaling
+        if !upscaling.isEmpty {
+            lines.append("")
+            lines.append("Upscaling log, newest last:")
+            lines += upscaling
+        }
         let subtitles = EngineLogBook.recentSubtitles
         if !subtitles.isEmpty {
             lines.append("")
@@ -264,7 +285,7 @@ enum AppAnswers {
         let lines = [
             "AIOStreams for Apple TV \(Identity.version)",
             "tvOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)",
-        ] + videoLines(player: player, window: window) + [""] + MemoryLog.report + TopShelf.report + [
+        ] + videoLines(player: player, window: window) + [""] + MemoryLog.report + [
             "Web app: \(web ?? "unknown")",
             "Server: \(server ?? "none")",
         ]

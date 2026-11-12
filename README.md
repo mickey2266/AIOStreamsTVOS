@@ -274,6 +274,22 @@ YouTube trailers play in the player. The app asks YouTube's player API for the v
 AIOStreams' desktop and Android apps do (`App/Player/YouTube.swift`). Where YouTube gives none,
 the page opens the trailer's link, which goes to the YouTube app if it's installed.
 
+Trailers also **play by themselves** in a card you rest on, the hero and title pages (Settings →
+Interface → Trailers), and the **mini player** plays on in a page's preview. Both draw the app's
+video in a box of the page: the page sends the box (`player-frame`), the app moves the video and its
+subtitles there under the page, and cuts a rounded hole through the page where it should show
+(`App/Player/VideoStage.swift`), as the Android app does. The bridge says it can (`miniPlayer`);
+without that the page never starts a trailer by itself. A trailer that plays in a box keeps the
+TV's display mode rather than switching it for Match Content (the bridge marks such a load
+`framed`), so resting on a card never blanks the screen. A TV has no corner card to drag, so the
+app sends the page no taps or drags on the video; the remote's presses reach the page as keys.
+tvOS's **Reduce Motion** stops trailers from starting by themselves, as the page asks.
+
+The hero's trailer never started, here or in the official apps: the home page's copy of each title
+lists no trailers (`RemoteTrailers: []`), and the page took that empty list for the answer before
+the title's details, which do list them, had come. It now waits for the details unless the row's
+copy names some (`patches/web/0037-tvos-trailers-wait-for-the-details.patch`).
+
 ### Seek-bar thumbnails
 
 Seeking shows a picture of the keyframe at or before the position, over the seek bar and in the
@@ -372,7 +388,15 @@ kept that from happening while browsing:
 - **Cards near the screen only.** Long rows and the Discover grid draw only the cards near the screen
   and hold the others' places empty (patches 0001 and 0002); the grid draws within one screen's
   height above and below. A grid is 10 or 12 posters across on a TV, so a wider margin kept 300 or
-  more cards mounted.
+  more cards mounted. On a TV the grid now draws within 60% of a screen's height
+  (`patches/web/0028-tvos-long-lists-draw-near-the-end.patch`), and an episode list set to the list
+  layout draws 24 episodes at first and 24 more each time its end comes within a screen, rather
+  than every episode of a season at once.
+- **Artwork workers.** The page shrinks artwork in web workers, which decode whole images inside the
+  page's process, in none of the picture counts. A TV runs two workers with two jobs each, and a
+  slow job lets as many more start (`patches/web/0027-tvos-artwork-workers-limited-and-counted.patch`),
+  where other hosts run three with four. The memory log counts them (workers, running, slow, most
+  at once, queued, bytes kept) beside the page's pictures, with the episodes and glide layers it holds.
 - **Pictures let go of.** The bridge script swaps a picture more than three screens away (cards'
   artwork, backdrops and logos) for a blank one, which lets WebKit drop its decoded copy, and puts
   it back within two. It does the same for every picture on a page kept out of sight: the home page,
@@ -389,6 +413,8 @@ Two more of the bridge script's switches, set while chasing those memory kills, 
   opening its version picker, which draws its backdrop under two masks or a poster under a blur
   across most of the screen. Edges that would fade end sharply, and blurred washes are plain.
   The few washes the page needs are drawn once on a tiny canvas instead (patches 0004 and 0005).
+  The page background keeps its mask: a trailer playing in the hero or behind a title page shows
+  through a hole the page cuts in it, and without the mask the video plays unseen behind it.
   The one exception: with the page's **Blur episodes you haven't started** on (Settings →
   Interface → Spoilers), the episode pictures and text it blurs keep their filters.
 - **`LAYERS`**: nothing kept as a layer at rest (`will-change`), except the glide layers the slides
@@ -411,12 +437,14 @@ Back behaviour and the bundled-player path. It also means:
   (`patches/web/0007-tvos-hides-settings-it-ignores.patch`) hides the Android settings that do
   nothing here:
   - The whole **Android app** section: updates (none here), **Play in the background** (leaving
-    the app pauses the video), the mpv.conf editor, and **Picture-in-picture**, whose button the
+    the app pauses the video), the mpv.conf editor and its shader files, and **Picture-in-picture**, whose button the
     player always shows. Its **Report a problem** row goes with it; the app menu (hold
     Play/Pause) has the app's diagnostics.
   - **Match the video's frame rate**: tvOS's own Match Content decides.
   - **Tunneled playback**.
   - **Engine**.
+  - **Cache size**: the player always uses Automatic, and a size picked before is ignored
+    (`patches/web/0030-tvos-hides-cache-size.patch`).
   - **Pass surround audio through** and its formats: an Apple TV copies Dolby Digital (Plus) and
     decodes the rest to PCM whatever is asked.
 - Settings → About names the app's version **tvOS app**, and its Credits list AetherEngine as the
@@ -425,6 +453,27 @@ Back behaviour and the bundled-player path. It also means:
 - Settings → **Donate** lists the GitHub Sponsors and Ko-fi links as text
   (`https://github.com/sponsors/Viren070`, `https://ko-fi.com/Viren070`) rather than buttons that
   open them, as a TV has no browser to open them in (`patches/web/0011-tvos-donate-shows-links.patch`).
+- **Anime upscaling** (Settings → Playback → Video) uses AetherEngine's super resolution rather
+  than the official app's anime shaders. The page turns it on only for what it takes for anime (an
+  AniList, Kitsu, MyAnimeList or AniDB id on the title, its season or its show), and the engine then
+  upscales SDR video below 1080p to the display, on its software player, from tvOS 26 (MetalFX from
+  tvOS 27.1). HDR, Dolby Vision, a source as large as the display, AirPlay and live channels play as
+  before; the engine's `[Upscale]` log line says why, and the statistics' Upscaling line says what it
+  did. Turning it on or off during a video, or with its key, reloads the video where it is. The
+  setting's help says so in place of the official app's description of its shaders
+  (`patches/web/0032-tvos-upscaling-help.patch`). **Upscale other video**, a setting of the Apple
+  TV app's own under it (off by default), does the same for everything that isn't anime; trailers
+  are never upscaled (`patches/web/0033-tvos-upscale-other-video.patch`).
+- The player's Chapters list keeps each chapter's picture as a data URL rather than a blob URL,
+  which tvOS's WebKit draws as a broken picture (`patches/web/0031-tvos-chapter-pictures-as-data-urls.patch`).
+- With Autoplay next episode on, once the countdown to the next episode (or the playlist's next
+  title) comes up, the page names its address, as it does for a player in its own window from the
+  start, and the app fetches its first bytes then (AetherEngine's `prewarm`, about 8 MB, held until
+  it opens). Dismissing the countdown drops the fetch. The page still loads the next one itself when
+  this one ends; the fetch only spares it the first round trips
+  (`patches/web/0035-tvos-warms-the-next-episode.patch`).
+- Time format on Automatic (Settings → Interface) follows the Apple TV's 12- or 24-hour clock,
+  which the app reads from the region as each page loads and hands the page as `hours24`.
 - On a TV, the remote moves focus along a row of posters and the row scrolls only when the next
   poster would leave the screen, rather than the focus staying where the row's first poster starts
   while the row slides under it (`patches/web/0013-tvos-rows-move-focus.patch`). Keys and a
@@ -443,7 +492,11 @@ Back behaviour and the bundled-player path. It also means:
 - A home row's name is a link to its whole catalog in Discover, which the page's remote navigation
   skips. Here it's a stop of its own above the row's posters: Up from any of them goes to it, Down
   into the row from above lands on it first, and Click opens the catalog
-  (`patches/web/0018-tvos-row-titles-open-catalog.patch`).
+  (`patches/web/0018-tvos-row-titles-open-catalog.patch`). Down passes a row that's still loading
+  straight from its name to the next one; once its posters are in, Up lands on them rather than
+  skipping back to its name: going back from one name to another looks for the way again rather
+  than retracing the last move, and a row's name is never where its posters resume
+  (`patches/web/0034-tvos-title-to-title-looks-again.patch`).
 - In the player, Click while the controls are hidden brings them up, with Play focused, rather than
   pausing or playing as the page does on other TVs; Play/Pause still pauses and plays
   (`patches/web/0021-tvos-select-shows-hidden-controls.patch`). While the skip button shows, Click
@@ -475,13 +528,11 @@ Back behaviour and the bundled-player path. It also means:
   from the engine. Their Engine line names AetherEngine and its version, which the app sends with
   the numbers (`patches/web/0009-tvos-stats-name-the-engine.patch`). The **Play with mpv** retry the page offers after a failed load, when a stored
   engine setting isn't Automatic, does nothing.
-- **Cache size** (Settings → Playback → Player) sizes the engine's buffer: with a size picked, it
-  buffers ahead until the cache holds that much, at least about 40 seconds and at most a quarter of
-  the free space, and keeps what played in the same space for seeking back. Automatic buffers 10
-  minutes ahead (about 6 GB of an 80 Mbit/s remux), or as much as a quarter of the free space holds
-  if that's less, so a remux rides out a slow stretch of the source; the picked sizes, 1000 MB at
-  most, hold less. It applies from the next video, and only to video AVPlayer plays: the engine's
-  software player keeps a fixed 96 MB ahead and 128 MB behind in memory.
+- The engine's buffer is always sized as Automatic: it buffers 10 minutes ahead (about 6 GB of an
+  80 Mbit/s remux), or as much as a quarter of the free space holds if that's less, so a remux
+  rides out a slow stretch of the source. This applies only to video AVPlayer plays: the engine's
+  software player keeps a fixed 96 MB ahead and 128 MB behind in memory. Live TV keeps the
+  engine's own live window.
 
 ## The remote
 
@@ -518,6 +569,11 @@ attaches it as an artifact, each push to `main` and each run started by hand (Ac
 Run workflow, on any branch) replaces the **Nightly** release, and a `v*` tag
 publishes a release of its own. Sign it with your own Apple ID using a sideloading tool that
 handles Apple TV; with a free Apple ID the signature lasts 7 days, with a paid account a year.
+
+Its first step compiles the bridge script's JavaScript (`node scripts/check-bridge.mjs`), so a
+syntax error there fails the build rather than the app: WebKit runs that script before the page,
+and one error stops all of it, which leaves the page signed out, laid out as a browser and deaf to
+the remote. Run it locally after editing `App/Web/BridgeScript.swift`.
 
 ### Sideloading source
 

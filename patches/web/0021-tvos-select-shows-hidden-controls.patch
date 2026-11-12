@@ -1,10 +1,11 @@
-diff --git a/packages/web/src/components/player/keys.ts b/packages/web/src/components/player/keys.ts
---- a/packages/web/src/components/player/keys.ts
-+++ b/packages/web/src/components/player/keys.ts
-@@ -204,6 +204,9 @@ export function usePlayerKeys(keys: PlayerKeys): void {
+diff --git a/packages/web/src/features/player/keys.ts b/packages/web/src/features/player/keys.ts
+index 3a823c22..706f3796 100644
+--- a/packages/web/src/features/player/keys.ts
++++ b/packages/web/src/features/player/keys.ts
+@@ -206,6 +206,9 @@ export function usePlayerKeys(keys: PlayerKeys): void {
          )
            return call(k().skipSegment);
-         if (k().visible) return focusControls();
+         if (k().visible()) return focusControls();
 +        // On a TV, Select on hidden controls brings them up on play, as
 +        // tvOS's own player does; Play/Pause still plays or pauses (AIOStreamsTVOS).
 +        if (currentHost().tv) return focusControls();

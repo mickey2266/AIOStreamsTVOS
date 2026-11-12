@@ -30,6 +30,11 @@ jobs:
         with:
           node-version: 22
 
+      # The script WebKit runs before the page: one syntax error in it stops all of it, which left
+      # the page signed out, zoomed out and deaf to the remote (d22e6c8). Seconds, so it goes first.
+      - name: Check the bridge script compiles
+        run: node scripts/check-bridge.mjs
+
       - name: Build the web app
         env:
           AIOSTREAMS_REF: ${{ inputs.aiostreams_ref || 'main' }}
