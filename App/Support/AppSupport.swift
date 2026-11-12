@@ -266,12 +266,6 @@ enum AppAnswers {
             lines.append("Engine's audio and loading log, newest last:")
             lines += audio
         }
-        let trailer = EngineLogBook.recentTrailer
-        if !trailer.isEmpty {
-            lines.append("")
-            lines.append("Hero trailer log, newest last:")
-            lines += trailer
-        }
         let upscaling = EngineLogBook.recentUpscaling
         if !upscaling.isEmpty {
             lines.append("")
