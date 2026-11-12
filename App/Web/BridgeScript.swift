@@ -689,20 +689,52 @@ enum BridgeScript {
         const before = document.activeElement;
         const passed = key('keydown', name, repeat);
         // For the app's remote log: whether the page took Up (a handled key is prevented), and where focus was.
-        if (name === 'ArrowUp' && !repeat) {
+        if ((name === 'ArrowUp' || name === 'ArrowDown') && !repeat) {
+          const after = document.activeElement;
           const where = (el) =>
             !el || el === document.body
               ? 'nothing'
               : el.tagName.toLowerCase() +
                 (el.dataset?.name ? ' ' + el.dataset.name : '') +
-                (el.closest?.('[data-ui]') ? ' in ' + el.closest('[data-ui]').dataset.ui : '');
-          send({
-            type: 'log',
-            level: 'info',
-            message:
-              '[remote] page ' + (passed ? 'left ArrowUp alone' : 'took ArrowUp') +
-              ', focus ' + where(before) + ' -> ' + where(document.activeElement),
-          });
+                (el.closest?.('[data-ui]') ? ' in ' + el.closest('[data-ui]').dataset.ui : '') +
+                (el.closest?.('[data-row]') ? ' of row ' + el.closest('[data-row]').dataset.row : '');
+          const titled = (el) => !!el?.closest?.('[data-nav=title]');
+          if (name === 'ArrowUp')
+            send({
+              type: 'log',
+              level: 'info',
+              message:
+                '[remote] page ' + (passed ? 'left ArrowUp alone' : 'took ArrowUp') +
+                ', focus ' + where(before) + ' -> ' + where(after),
+            });
+          // One row's name to another's: the row passed over, and why its cards weren't taken.
+          if (after !== before && titled(before) && titled(after)) {
+            const passedRow = (name === 'ArrowUp' ? after : before).closest('[data-ui="media-row"]');
+            if (passedRow) {
+              const slides = [...passedRow.querySelectorAll('[data-ui="media-row-item"]')];
+              const links = [...passedRow.querySelectorAll('a[href], button, [tabindex]')].filter(
+                (el) => !titled(el)
+              );
+              const box = passedRow.getBoundingClientRect();
+              const ruled = links.filter((el) =>
+                el.closest('[inert], [aria-hidden="true"], [data-nav="skip"]')
+              ).length;
+              const flat = links.filter((el) => {
+                const r = el.getBoundingClientRect();
+                return !r.width || !r.height;
+              }).length;
+              send({
+                type: 'log',
+                level: 'info',
+                message:
+                  '[remote] ' + name + ' passed row ' + (passedRow.dataset.row || '?') +
+                  ': ' + slides.length + ' slides, ' +
+                  slides.filter((s) => s.hasAttribute('data-nav-out')).length + ' marked out of view, ' +
+                  links.length + ' focusable, ' + ruled + ' ruled out, ' + flat + ' with no size; row at ' +
+                  Math.round(box.top) + '..' + Math.round(box.bottom) + ' of ' + innerHeight,
+              });
+            }
+          }
         }
         // A scrolled slide runs no animation to wait for, so the artwork sweep is told how long it runs.
         if (PAGE_SCROLLS && (name === 'ArrowUp' || name === 'ArrowDown'))
