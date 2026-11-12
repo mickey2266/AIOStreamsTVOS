@@ -266,6 +266,12 @@ enum AppAnswers {
             lines.append("Engine's audio and loading log, newest last:")
             lines += audio
         }
+        let upscaling = EngineLogBook.recentUpscaling
+        if !upscaling.isEmpty {
+            lines.append("")
+            lines.append("Upscaling log, newest last:")
+            lines += upscaling
+        }
         let subtitles = EngineLogBook.recentSubtitles
         if !subtitles.isEmpty {
             lines.append("")

@@ -1730,30 +1730,7 @@ final class AetherPlayer {
             stats["dolbyVisionRoute"] = route
         }
         // The page's Upscaling line, as the Android app sends it.
-        if let upscale = engine.activeUpscale {
-            let from = "\(Int(upscale.sourceSize.width))x\(Int(upscale.sourceSize.height))"
-            let to = "\(Int(upscale.targetSize.width))x\(Int(upscale.targetSize.height))"
-            // The stages that ran, spelled out. MetalFX scales what the super resolution leaves short of the
-            // target; once the engine drops it (over its frame budget, and then for the whole run of the app),
-            // the target is the super resolution's own size. Both sizes are even, as the engine's plan makes them.
-            var stages: [String] = []
-            if let ml = upscale.mlScale { stages.append(String(format: "super resolution %.0fx", ml)) }
-            let reached = upscale.mlScale.map { ml in
-                Int((Float(upscale.sourceSize.width) * ml).rounded(.down)) & ~1 == Int(upscale.targetSize.width)
-                    && Int((Float(upscale.sourceSize.height) * ml).rounded(.down)) & ~1 == Int(upscale.targetSize.height)
-            } ?? false
-            if !reached { stages.append("MetalFX") }
-            var line = "\(from) to \(to): " + stages.joined(separator: " then ")
-            if upscale.degraded {
-                line += " (MetalFX dropped: the stage ran over its frame budget)"
-            } else if reached {
-                line += " (reached the target, so MetalFX wasn't needed)"
-            }
-            if let reason = upscale.disabledReason { line = "off (\(reason)), was \(line)" }
-            stats["upscaling"] = line
-        } else if loadedUpscaling {
-            stats["upscaling"] = "not used for this video (the engine's [Upscale] line says why)"
-        }
+        if let summary = upscalingSummary { stats["upscaling"] = summary }
         // What the TV can show, as Android lists its display's HDR types. tvOS reports no HDR10+ capability,
         // so HDR10+ is listed while it's the mode playing. Dolby Vision profiles are the Apple TV's decoder's:
         // every Apple TV 4K decodes profiles 5 and 8 itself, whatever the TV.
@@ -1823,6 +1800,35 @@ final class AetherPlayer {
         lastVideo = ["Last video: \(name), \(ending)\(at), \(time)"] + videoReport
     }
 
+    /**
+     * What the upscaling stage did for the video, for the page's Upscaling line and the report; nil when it
+     * wasn't asked for. The stages that ran are spelled out. MetalFX scales what the super resolution leaves
+     * short of the target; once the engine drops it (over its frame budget, and then for the whole run of the
+     * app), the target is the super resolution's own size. Both sizes are even, as the engine's plan makes them.
+     */
+    private var upscalingSummary: String? {
+        guard let upscale = engine.activeUpscale else {
+            return loadedUpscaling ? "not used for this video (the engine's [Upscale] line says why)" : nil
+        }
+        let from = "\(Int(upscale.sourceSize.width))x\(Int(upscale.sourceSize.height))"
+        let to = "\(Int(upscale.targetSize.width))x\(Int(upscale.targetSize.height))"
+        var stages: [String] = []
+        if let ml = upscale.mlScale { stages.append(String(format: "super resolution %.0fx", ml)) }
+        let reached = upscale.mlScale.map { ml in
+            Int((Float(upscale.sourceSize.width) * ml).rounded(.down)) & ~1 == Int(upscale.targetSize.width)
+                && Int((Float(upscale.sourceSize.height) * ml).rounded(.down)) & ~1 == Int(upscale.targetSize.height)
+        } ?? false
+        if !reached { stages.append("MetalFX") }
+        var line = "\(from) to \(to): " + stages.joined(separator: " then ")
+        if upscale.degraded {
+            line += " (MetalFX dropped: the stage ran over its frame budget)"
+        } else if reached {
+            line += " (reached the target, so MetalFX wasn't needed)"
+        }
+        if let reason = upscale.disabledReason { line = "off (\(reason)), was \(line)" }
+        return line
+    }
+
     /// What the app menu and the diagnostics say about the video and its sound.
     var report: [String] {
         guard current != nil, !ended else {
@@ -1844,6 +1850,7 @@ final class AetherPlayer {
                 + " → shown as \(Self.formatName(engine.videoFormat))",
             "Video decoder: \(engine.activeVideoDecoder ?? "none")",
         ]
+        if let upscaling = upscalingSummary { lines.append("Upscaling: \(upscaling)") }
         if let audio = activeAudio {
             lines.append("Audio track: \(audio.codec) \(audio.channels) ch"
                 + (audio.profile.map { ", \($0)" } ?? "")
