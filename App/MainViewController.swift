@@ -151,6 +151,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
             version: "\(Identity.version)-tvos",
             device: Identity.device,
             deviceId: Identity.deviceId,
+            hours24: Identity.hours24,
             storage: storage.json
         ))
         let ours = url.flatMap { $0.scheme?.lowercased() == WebApp.scheme ? $0 : nil }

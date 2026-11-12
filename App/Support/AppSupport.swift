@@ -16,6 +16,13 @@ enum Identity {
 
     static let device = UIDevice.current.name.isEmpty ? "Apple TV" : UIDevice.current.name
 
+    /// The system's clock is 24-hour: the hour the region (and a 24-hour choice over it) writes has no
+    /// AM/PM marker. Read as each page loads, for the page's Time format on Automatic (`hours24`).
+    static var hours24: Bool {
+        let format = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current) ?? ""
+        return !format.contains("a")
+    }
+
     /// Ends in "iPad" so the web app offers the iOS players (Infuse, VLC) for external playback.
     static var userAgent: String {
         let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")

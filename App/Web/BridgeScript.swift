@@ -12,11 +12,12 @@ import Foundation
  */
 enum BridgeScript {
     /// `storage` is the app's copy of localStorage by origin, as JSON.
-    static func make(version: String, device: String, deviceId: String, storage: String) -> String {
+    static func make(version: String, device: String, deviceId: String, hours24: Bool, storage: String) -> String {
         template
             .replacingOccurrences(of: "__VERSION__", with: literal(version))
             .replacingOccurrences(of: "__DEVICE__", with: literal(device))
             .replacingOccurrences(of: "__DEVICE_ID__", with: literal(deviceId))
+            .replacingOccurrences(of: "__HOURS24__", with: hours24 ? "true" : "false")
             .replacingOccurrences(of: "__STORAGE__", with: storage)
     }
 
@@ -426,6 +427,9 @@ enum BridgeScript {
     // (updates, picture-in-picture, background play, mpv.conf), the engine, tunneling, frame-rate
     // matching (tvOS's own Match Content) and passthrough.
     appleTv: true,
+    // The system's 12- or 24-hour clock, for the page's Time format on Automatic (the player's clock,
+    // the TV guide), as the Android app sends it.
+    hours24: __HOURS24__,
     device: __DEVICE__,
     deviceId: __DEVICE_ID__,
     send,

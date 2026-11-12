@@ -29,6 +29,7 @@ const script = template
   .replaceAll('__VERSION__', '"0"')
   .replaceAll('__DEVICE_ID__', '"device"')
   .replaceAll('__DEVICE__', '"Apple TV"')
+  .replaceAll('__HOURS24__', 'true')
   .replaceAll('__STORAGE__', '{}');
 const left = script.match(/__[A-Z_]+__/);
 if (left) {
