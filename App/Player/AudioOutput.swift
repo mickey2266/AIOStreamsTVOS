@@ -300,6 +300,15 @@ enum EngineLogBook {
     private static var upscaling: [String] = []
     private static let keptUpscaling = 40
 
+    private static var trailerLines: [String] = []
+    private static let keptTrailer = 40
+
+    static var recentTrailer: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return trailerLines
+    }
+
     /// Every 30 s, so they'd fill the audio lines on their own; they say nothing a stall needs.
     private static let noiseWords = ["bed levels"]
 
@@ -331,6 +340,15 @@ enum EngineLogBook {
     /// The app's own line, beside the engine's, for the app menu; its subtitle lines with the engine's.
     static func note(_ line: String) {
         NSLog("%@", line)
+        // The page's word on the hero's trailer (patches/web/0036), in a section of its own, as a playing
+        // trailer's own lines would soon push it out of the audio and loading lines.
+        if line.hasPrefix("[page] [trailer]") {
+            lock.lock()
+            trailerLines.append(String(line.prefix(300)))
+            if trailerLines.count > keptTrailer { trailerLines.removeFirst(trailerLines.count - keptTrailer) }
+            lock.unlock()
+            return
+        }
         if line.hasPrefix("[player] upscaling") { keepUpscaling(line) }
         if line.hasPrefix("[subtitles]") { keepSubtitle(line) } else { keep(line) }
     }

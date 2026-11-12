@@ -515,7 +515,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
             // The page's `appLog`, into the app's log. Its subtitle sync lines (`[sync]`, patches/web/0025 and 0026) also go
             // into the app menu's report, beside the app's own; the rest, such as live recovery's, would crowd it.
             let line = String((message.text("message") ?? "").prefix(400))
-            if line.hasPrefix("[sync]") {
+            // The hero's trailer's decisions (`[trailer]`, patches/web/0036) too, for now.
+            if line.hasPrefix("[sync]") || line.hasPrefix("[trailer]") {
                 EngineLogBook.note("[page] \(line)")
             } else {
                 NSLog("[page] %@ %@", message.text("level") ?? "info", line)
