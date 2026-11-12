@@ -322,7 +322,6 @@ private final class KeyboardHost: UIViewController {
         let windows = window.windowScene?.windows ?? [window]
         for each in windows { look(each) }
         guard let found else { return }
-        let fromView = measuredKeys
         // The keyboard focus is on, where it's one of tvOS's keyboard views: the one that holds the keys.
         let focused = UIFocusSystem.focusSystem(for: layout)?.focusedItem
         var fromFocus: CGRect?
@@ -355,12 +354,6 @@ private final class KeyboardHost: UIViewController {
             let right = min(max(drawn.maxX, around.maxX + Self.hintOverhang), screen.bounds.maxX - Self.gridMargin - 8)
             measuredKeys = CGRect(x: drawn.minX, y: drawn.minY, width: right - drawn.minX, height: drawn.height)
         }
-        if found {
-            KeyboardReport.record(
-                layout: layout, fromView: fromView, fromFocus: fromFocus,
-                used: measuredKeys, box: box.frame, focused: focused
-            )
-        }
         if found != grid {
             // Laid out for the other keyboard: opened again, once, laid out for this one.
             grid = found
@@ -392,62 +385,6 @@ private final class KeyboardHost: UIViewController {
             UIView.performWithoutAnimation { self.place() }
         }
         hideLinesPastBox(in: windows)
-    }
-}
-
-/**
- * What the grid keyboard's box was last measured from, for the app menu (hold
- * Play/Pause): the measures tried, the one used, the box, the focused key, and
- * the views drawn at the keyboard's left, leftmost first. In points, in the
- * keyboard's layout, which the box shows from the measured left edge.
- */
-enum KeyboardReport {
-    private(set) static var lines: [String] = ["Grid keyboard: not measured since the app started"]
-
-    private static func text(_ rect: CGRect?) -> String {
-        guard let rect else { return "none" }
-        return String(format: "x %.0f, y %.0f, %.0f × %.0f", rect.minX, rect.minY, rect.width, rect.height)
-    }
-
-    fileprivate static func record(
-        layout: UIView, fromView: CGRect?, fromFocus: CGRect?,
-        used: CGRect?, box: CGRect, focused: UIFocusItem?
-    ) {
-        var out = [
-            "Grid keyboard, last measured \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)):",
-            "Layout: \(text(layout.frame)); box \(text(box)); both on screen, as the keyboard below",
-            "Narrowest keyboard view: \(text(fromView))",
-            "Focused keyboard view: \(text(fromFocus))",
-            "Used: \(text(used))",
-        ]
-        if let focused {
-            var frame = focused.frame
-            if let view = focused as? UIView {
-                frame = view.convert(view.bounds, to: layout)
-            } else if let space = focused.parentFocusEnvironment?.focusItemContainer?.coordinateSpace {
-                frame = space.convert(focused.frame, to: layout)
-            }
-            out.append("Focused: \(String(describing: type(of: focused))) \(text(frame))")
-        }
-        // The views at the keyboard's left, to see what starts where.
-        var views: [(CGRect, String)] = []
-        func look(_ view: UIView, depth: Int) {
-            guard !view.isHidden, view.alpha > 0.01, depth < 40 else { return }
-            if view !== layout {
-                let frame = view.convert(view.bounds, to: layout)
-                if frame.width >= 2, frame.height >= 2, frame.minY < 700 {
-                    let name = String(describing: type(of: view))
-                    views.append((frame, "\(name)\(view.subviews.isEmpty ? "" : " [\(view.subviews.count)]")"))
-                }
-            }
-            for subview in view.subviews { look(subview, depth: depth + 1) }
-        }
-        look(layout, depth: 0)
-        views.sort { $0.0.minX < $1.0.minX }
-        out.append("Views, leftmost first (\(views.count)):")
-        for (frame, name) in views.prefix(40) { out.append("  \(text(frame)) \(name)") }
-        lines = out
-        NSLog("[keyboard] %@", out.joined(separator: " | "))
     }
 }
 

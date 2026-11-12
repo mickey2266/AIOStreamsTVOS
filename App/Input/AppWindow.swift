@@ -27,9 +27,6 @@ final class AppWindow: UIWindow {
             // Something opened over the page while a press was down (Up opening the search
             // keyboard): the rest of that press goes where it began, not to the screen on top.
             // A new press always goes to the screen on top.
-            if presses.contains(where: { $0.phase == .began && $0.type == .upArrow }) {
-                EngineLogBook.remote("ArrowUp went to the screen on top, not the page")
-            }
             let carried = presses.filter { $0.phase != .began && remote.ownsPress($0) }
             for press in carried { remote.remotePress(press) }
             if !carried.isEmpty, carried.count == presses.count { return }

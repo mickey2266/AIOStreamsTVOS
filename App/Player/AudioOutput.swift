@@ -335,28 +335,6 @@ enum EngineLogBook {
         if line.hasPrefix("[subtitles]") { keepSubtitle(line) } else { keep(line) }
     }
 
-    /**
-     * What the Siri Remote's arrows did: each press, whether it was sent, held back or dropped (and why), the
-     * swipes' steps, and what the page did with Up. An ignored Up said nothing anywhere before. Stamped with
-     * the uptime in ms, as the order and the gaps are the question. Not sent to NSLog: a swipe makes many.
-     */
-    private static var remoteLines: [String] = []
-    private static let keptRemote = 60
-
-    static func remote(_ line: String) {
-        let ms = Int((ProcessInfo.processInfo.systemUptime * 1000).truncatingRemainder(dividingBy: 1_000_000))
-        lock.lock()
-        remoteLines.append("\(ms) \(line.prefix(300))")
-        if remoteLines.count > keptRemote { remoteLines.removeFirst(remoteLines.count - keptRemote) }
-        lock.unlock()
-    }
-
-    static var recentRemote: [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return remoteLines
-    }
-
     private static func keepUpscaling(_ line: String) {
         lock.lock()
         upscaling.append(String(line.prefix(500)))

@@ -266,12 +266,6 @@ enum AppAnswers {
             lines.append("Engine's audio and loading log, newest last:")
             lines += audio
         }
-        let remote = EngineLogBook.recentRemote
-        if !remote.isEmpty {
-            lines.append("")
-            lines.append("Remote log (uptime ms), newest last:")
-            lines += remote
-        }
         let upscaling = EngineLogBook.recentUpscaling
         if !upscaling.isEmpty {
             lines.append("")
@@ -291,7 +285,7 @@ enum AppAnswers {
         let lines = [
             "AIOStreams for Apple TV \(Identity.version)",
             "tvOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)",
-        ] + videoLines(player: player, window: window) + [""] + MemoryLog.report + TopShelf.report + [
+        ] + videoLines(player: player, window: window) + [""] + MemoryLog.report + [
             "Web app: \(web ?? "unknown")",
             "Server: \(server ?? "none")",
         ]
