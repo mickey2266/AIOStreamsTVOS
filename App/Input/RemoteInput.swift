@@ -235,20 +235,13 @@ final class RemoteInput {
     /*
      * A thumb resting on the clickpad drifts before it clicks: past `swipeIntent`, so it counts as a
      * swipe, but short of a step, so the swipe did nothing. The remote log showed Up dropped after the
-     * thumb had drifted 130 and 204 pt down without a step, either way from the edge it then clicked.
-     * The arrow a swipe brings with it from an edge begins as the swipe begins, before the finger has
-     * gone far (it's held back then, and `swipeStarted` drops it), so an arrow that begins once a swipe
-     * has gone `driftClick` without stepping is a click. A swipe that stepped still owns its arrows.
+     * thumb had drifted 130 and 204 pt without a step, either way from the edge it then clicked, and
+     * after a cutoff of 80 pt, after 14 and 78 pt. The arrow a swipe brings with it from an edge begins
+     * as the finger comes down, before it has moved: it's held back then (`holdPending`), and
+     * `swipeStarted` drops it. So an arrow that begins once a swipe is under way, or just after one,
+     * is a click unless the swipe has stepped. A swipe that stepped still owns its arrows.
      */
-    private var clickDuringDrift: Bool {
-        guard !swipeStepped else { return false }
-        // Just after a swipe that ended without a step: the thumb lifted and clicked.
-        guard touchDown else { return true }
-        return max(abs(touchAt.x - swipeAnchor.x), abs(touchAt.y - swipeAnchor.y)) >= Self.driftClick
-    }
-
-    /// How far a swipe must have drifted, without a step, before an arrow beginning during it is a click.
-    private static let driftClick: CGFloat = 80
+    private var clickDuringDrift: Bool { !swipeStepped }
 
     /// How far the finger has gone from `from` other than toward the arrow's edge: a thumb rolling onto
     /// the edge it presses is the click, while one moving along or away from it is a swipe.
