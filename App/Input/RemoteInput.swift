@@ -41,6 +41,8 @@ final class RemoteInput {
     /// A finger is on the touch surface, and whether it has moved far enough to be a swipe.
     private var touchDown = false
     private var touchSwiping = false
+    /// The touch's swipe has sent a step (kept after it ends, until the next touch begins).
+    private var swipeStepped = false
     /// When the last swipe's finger lifted.
     private var swipeEndedAt: TimeInterval = 0
 
@@ -160,7 +162,7 @@ final class RemoteInput {
             guard let key = Self.key(for: press.type) else { return }
             let arrow = Self.isArrow(press.type)
             if began {
-                if arrow, partOfSwipe {
+                if arrow, partOfSwipe, !slidToEdge(press.type) {
                     dropped.insert(press.type)
                     return
                 }
@@ -177,7 +179,7 @@ final class RemoteInput {
                 if let held = pending, held.type == press.type {
                     clearPending()
                     // The finger slid off the edge: the start of a swipe, not a click.
-                    if fingerMoved(since: held.from) { return }
+                    if strayTravel(since: held.from, held.type) > Self.pressSlop { return }
                     // Let go before it settled: a quick click, which steps once.
                     tap(key)
                     return
@@ -191,6 +193,40 @@ final class RemoteInput {
     /// A swipe is under way, or one just ended.
     private var partOfSwipe: Bool {
         touchSwiping || ProcessInfo.processInfo.systemUptime - swipeEndedAt < Self.swipeAfterglow
+    }
+
+    /*
+     * A thumb resting on the clickpad slides toward an edge before it clicks: past `swipeIntent`, so
+     * it counts as a swipe, but short of a step, so the swipe did nothing. The click that follows is
+     * the only thing the thumb did, and dropping it as a swipe's stray arrow made Up seem ignored.
+     * A swipe that stepped, or that went another way than the arrow, still owns its arrow.
+     */
+    private func slidToEdge(_ type: UIPress.PressType) -> Bool {
+        guard !swipeStepped else { return false }
+        let dx = touchAt.x - swipeAnchor.x
+        let dy = touchAt.y - swipeAnchor.y
+        switch type {
+        case .upArrow: return dy < 0 && -dy >= abs(dx)
+        case .downArrow: return dy > 0 && dy >= abs(dx)
+        case .leftArrow: return dx < 0 && -dx >= abs(dy)
+        case .rightArrow: return dx > 0 && dx >= abs(dy)
+        default: return false
+        }
+    }
+
+    /// How far the finger has gone from `from` other than toward the arrow's edge: a thumb rolling onto
+    /// the edge it presses is the click, while one moving along or away from it is a swipe.
+    private func strayTravel(since from: CGPoint?, _ type: UIPress.PressType) -> CGFloat {
+        guard let from else { return 0 }
+        let dx = touchAt.x - from.x
+        let dy = touchAt.y - from.y
+        switch type {
+        case .upArrow: return max(dy, abs(dx))
+        case .downArrow: return max(-dy, abs(dx))
+        case .leftArrow: return max(dx, abs(dy))
+        case .rightArrow: return max(-dx, abs(dy))
+        default: return max(abs(dx), abs(dy))
+        }
     }
 
     private func holdPending(_ type: UIPress.PressType, _ key: String) {
@@ -212,7 +248,7 @@ final class RemoteInput {
         pendingTimer?.invalidate()
         pendingTimer = Timer.scheduledTimer(withTimeInterval: Self.pressSettle, repeats: false) { [weak self] _ in
             guard let self, let held = self.pending else { return }
-            if self.fingerMoved(since: held.from) {
+            if self.strayTravel(since: held.from, held.type) > Self.pressSlop {
                 self.clearPending()
                 self.dropped.insert(held.type)
                 return
@@ -229,11 +265,6 @@ final class RemoteInput {
             self.keyDown(held.key, false)
             self.startRepeating(held.key)
         }
-    }
-
-    /// The finger on the surface has moved further than a click moves it since `from`.
-    private func fingerMoved(since from: CGPoint?) -> Bool {
-        fingerTravel(since: from) > Self.pressSlop
     }
 
     /// How far the finger has gone from `from`, measured to where it was last seen, so a press
@@ -329,6 +360,7 @@ final class RemoteInput {
             var sent = 0
             while swipeSteps < due, sent < Self.maxStepsPerSample {
                 swipeSteps += 1
+                swipeStepped = true
                 sent += 1
                 let key = across
                     ? (swipeSign > 0 ? "ArrowRight" : "ArrowLeft")
@@ -355,6 +387,7 @@ final class RemoteInput {
         resetSteps()
         touchDown = true
         touchSwiping = false
+        swipeStepped = false
     }
 
     private func resetSteps() {
