@@ -1,0 +1,28 @@
+diff --git a/packages/web/src/app/settings/playback.tsx b/packages/web/src/app/settings/playback.tsx
+index 7d7ac74c..24a4d6a1 100644
+--- a/packages/web/src/app/settings/playback.tsx
++++ b/packages/web/src/app/settings/playback.tsx
+@@ -636,13 +636,16 @@ function PlayerCard() {
+               onValueChange={(v) => setEngine(v as PlayerEngine)}
+             />
+           )}
+-          <Select
+-            label={t`Cache size`}
+-            help={t`How much of the video the player holds in memory: ahead, to ride out a slow connection, and behind, to seek back at once. Automatic sizes it from this device's memory.`}
+-            options={cacheOptions()}
+-            value={cacheSize}
+-            onValueChange={(v) => setCacheSize(v as CacheSize)}
+-          />
++          {/* The Apple TV app always buffers as Automatic, whatever this says (AIOStreamsTVOS). */}
++          {!appleTv() && (
++            <Select
++              label={t`Cache size`}
++              help={t`How much of the video the player holds in memory: ahead, to ride out a slow connection, and behind, to seek back at once. Automatic sizes it from this device's memory.`}
++              options={cacheOptions()}
++              value={cacheSize}
++              onValueChange={(v) => setCacheSize(v as CacheSize)}
++            />
++          )}
+         </>
+       )}
+       {launched && (

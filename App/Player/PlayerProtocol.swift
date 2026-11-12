@@ -103,8 +103,6 @@ struct PlayerSettings: Equatable {
     var objectAudio = false
     /// The page's Speakers choice under it: 7.1.4 (the default) or 9.1.6, the two beds DTS:X renders into.
     var objectAudioLayout: SpatialSpeakerLayout = .l714
-    /// Megabytes of the stream to hold, ahead and behind, 0 for the engine's own (`AetherPlayer.options`).
-    var cacheMb = 0
 }
 
 enum PlayerProtocol {
@@ -189,9 +187,7 @@ enum PlayerProtocol {
         settings.nightMode = message.flag("nightMode") == true
         settings.objectAudio = message.flag("objectAudio") == true
         settings.objectAudioLayout = message.text("objectAudioLayout") == "9.1.6" ? .l916 : .l714
-        // The page offers 128 to 1000 MB; a value far outside that is held to 64...4000.
-        let cacheMb = message.number("cacheMb") ?? 0
-        settings.cacheMb = cacheMb.isFinite && cacheMb > 0 ? Int(min(max(cacheMb, 64), 4000)) : 0
+        // The page still sends its Cache size (`cacheMb`); the player always buffers as Automatic.
         return settings
     }
 

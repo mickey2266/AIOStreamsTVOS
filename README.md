@@ -440,6 +440,8 @@ Back behaviour and the bundled-player path. It also means:
   - **Engine**.
   - **Anime upscaling**, and the player's key for it: AetherEngine has none
     (`patches/web/0029-tvos-no-upscaling.patch`).
+  - **Cache size**: the player always uses Automatic, and a size picked before is ignored
+    (`patches/web/0030-tvos-hides-cache-size.patch`).
   - **Pass surround audio through** and its formats: an Apple TV copies Dolby Digital (Plus) and
     decodes the rest to PCM whatever is asked.
 - Settings → About names the app's version **tvOS app**, and its Credits list AetherEngine as the
@@ -498,13 +500,11 @@ Back behaviour and the bundled-player path. It also means:
   from the engine. Their Engine line names AetherEngine and its version, which the app sends with
   the numbers (`patches/web/0009-tvos-stats-name-the-engine.patch`). The **Play with mpv** retry the page offers after a failed load, when a stored
   engine setting isn't Automatic, does nothing.
-- **Cache size** (Settings → Playback → Player) sizes the engine's buffer: with a size picked, it
-  buffers ahead until the cache holds that much, at least about 40 seconds and at most a quarter of
-  the free space, and keeps what played in the same space for seeking back. Automatic buffers 10
-  minutes ahead (about 6 GB of an 80 Mbit/s remux), or as much as a quarter of the free space holds
-  if that's less, so a remux rides out a slow stretch of the source; the picked sizes, 1000 MB at
-  most, hold less. It applies from the next video, and only to video AVPlayer plays: the engine's
-  software player keeps a fixed 96 MB ahead and 128 MB behind in memory.
+- The engine's buffer is always sized as Automatic: it buffers 10 minutes ahead (about 6 GB of an
+  80 Mbit/s remux), or as much as a quarter of the free space holds if that's less, so a remux
+  rides out a slow stretch of the source. This applies only to video AVPlayer plays: the engine's
+  software player keeps a fixed 96 MB ahead and 128 MB behind in memory. Live TV keeps the
+  engine's own live window.
 
 ## The remote
 
@@ -512,7 +512,7 @@ Back behaviour and the bundled-player path. It also means:
 | ----------------------------------- | ------------------------------------------------- |
 | Clickpad edges / swipe              | Arrow keys (held edges repeat; a swipe up or down moves one row, or two when it's long; across, it moves as many posters as its length; an edge the swipe starts or ends on adds no arrow of its own; Left from a row's or a grid line's first poster opens the navigation)|
 | Click                               | Enter (held, the page's hold actions)             |
-| Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving off the keys closes it. The Search page opens it on its own as it opens, unless it opens with a search already in it, as Back to a search's results does. The linear keyboard keeps tvOS's full-screen layout over a black backdrop, with the page showing in the space below it. The grid keyboard (Settings → General → Keyboard) sits in a black box at the screen's top right, its keys' width as measured from what tvOS draws, with the page to its left. Passwords and PINs get the keyboard in an alert |
+| Click on a text field               | tvOS's search keyboard over the page, typing straight into the field (dictation on the mic button); Menu or moving off the keys closes it. The Search page opens it on its own as it opens, unless it opens with a search already in it, as Back to a search's results does. The server and sign-in forms open it on the field they start on (the server's address, the UUID or user name, the password after a user is picked, the PIN when the server asks for one), but not on a field the remote moved to. The linear keyboard keeps tvOS's full-screen layout over a black backdrop, with the page showing in the space below it. The grid keyboard (Settings → General → Keyboard) sits in a black box at the screen's top right, its keys' width as measured from what tvOS draws, with the page to its left. Passwords and PINs get the keyboard in an alert |
 | Click in a searchable list          | The pickers with up and down carets, such as Discover's catalog picker: picks the highlighted entry, including the one highlighted as the list opens or after a search; opens the keyboard only when nothing is left to pick |
 | Up from a searchable list's top entry | Opens the keyboard to search (a held Up, or a quick run of presses, stops at the top instead) |
 | Back / Menu                         | The page's Back; twice on Home leaves the app     |

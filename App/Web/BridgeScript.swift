@@ -640,6 +640,30 @@ enum BridgeScript {
   window.addEventListener('hashchange', () => openSearchKeyboard());
   window.addEventListener('load', () => openSearchKeyboard());
 
+  /*
+   * The server and sign-in pages' forms (`data-ui="auth-card"`: the server's address, the UUID or
+   * user name, the configuration's password after a user is picked, the PIN the server asks for
+   * after the password) open the keyboard on the field the page focuses by itself as the form
+   * appears (React's autoFocus), rather than waiting for Select on it. Focus the remote moved there
+   * with an arrow or a swipe (`lastArrow`) leaves it closed, so moving down from the UUID to the
+   * password doesn't open it. Each field opens it once: the focus the keyboard gives back as it
+   * closes (`done`) and a field kept through a wrong password don't open it again.
+   */
+  const ARROW_MOVES_FOCUS_WITHIN = 400;
+  let lastArrow = 0;
+  const authOpened = new WeakSet();
+  document.addEventListener('focusin', (event) => {
+    const el = event.target;
+    if (!isTextField(el) || !el.closest?.('[data-ui="auth-card"]')) return;
+    if (performance.now() - lastArrow < ARROW_MOVES_FOCUS_WITHIN) return;
+    // After React's commit, which focuses the field as it adds it.
+    setTimeout(() => {
+      if (editing || authOpened.has(el) || !el.isConnected || document.activeElement !== el) return;
+      authOpened.add(el);
+      openKeyboard(el);
+    });
+  });
+
   Object.defineProperty(window, '__aioTV', {
     value: Object.freeze({
       down(name, repeat) {
@@ -682,6 +706,7 @@ enum BridgeScript {
         const now = performance.now();
         held = !!repeat || now - lastDown < 150;
         lastDown = now;
+        if (name.startsWith('Arrow')) lastArrow = now;
         key('keydown', name, repeat);
         // A scrolled slide runs no animation to wait for, so the artwork sweep is told how long it runs.
         if (PAGE_SCROLLS && (name === 'ArrowUp' || name === 'ArrowDown'))

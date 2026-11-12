@@ -182,9 +182,11 @@ final class AetherPlayer {
         }
         // The page names the new video once it starts (`now-playing`).
         if !asLive && !onAVPlayer { title = nil }
+        flushStartTiming()
         generation += 1
         let generation = generation
         loadBegan = ProcessInfo.processInfo.systemUptime
+        watchRouteDuringStart()
         audioReadyAt = nil
         loadedAt = nil
         current = request
@@ -214,11 +216,20 @@ final class AetherPlayer {
         // is asked, alongside the audio session's activation rather than after it.
         let declaredLive = asLive || onAVPlayer || request.live
         let checks = !declaredLive && !request.isTrailer && LiveHLS.mayBePlaylist(url)
+        let waitsForSession = primes
         loading = Task { [weak self] in
             async let checked: LiveHLS.Verdict? = checks ? LiveHLS.check(url, headers: request.headers) : nil
-            await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
+            // The session's activation is a round trip to the system's audio server, and it went in front
+            // of the whole load. It runs beside the load now, which opens the file for far longer; AVPlayer
+            // activates the session itself as it plays (engine #24), so nothing in the load needs it
+            // first. The Dolby primer plays into the session, so with the primer on the load still waits.
+            let activation = Task { @MainActor [weak self] in
+                await withCheckedContinuation { done in AudioOutput.activate { done.resume() } }
+                guard let self, generation == self.generation else { return }
+                self.audioReadyAt = ProcessInfo.processInfo.systemUptime
+            }
+            if waitsForSession { await activation.value }
             guard let self, generation == self.generation else { return }
-            self.audioReadyAt = ProcessInfo.processInfo.systemUptime
             // Silent Dolby through the load, until the video's sound has started, so decoded
             // multichannel sound isn't downmixed into a stereo link (Continuous Audio Connection off).
             // A trailer goes without: it's a couple of minutes long and nearly always stereo.
@@ -231,6 +242,8 @@ final class AetherPlayer {
             if let verdict = await checked {
                 guard generation == self.generation else { return }
                 live = verdict.live
+                // The load waited for it, so its time is the start's too.
+                self.markStart("live check done")
                 EngineLogBook.note("[player] live check: \(verdict.reason) (\(Self.shortened(url)))")
             } else if request.live, !asLive {
                 EngineLogBook.note("[player] live: the page says so (\(Self.shortened(url)))")
@@ -318,11 +331,8 @@ final class AetherPlayer {
         if !settings.dolbyVision || !AetherEngine.displayCapabilities.supportsDolbyVision {
             options.dolbyVisionHandling = .baseLayerOnly
         }
-        // The page's Cache size: the engine buffers ahead until the cache holds that much, and keeps what
-        // played behind it in the same space, so a seek back is at once. The window is the engine's
-        // whole-source opt-in, bounded by those bytes (`PrefetchDiskBudget`) rather than a count of
-        // segments, as the file's bitrate isn't known before it opens. It stays at least 10 segments
-        // (~40 s) ahead whatever the size, and a quarter of the free space caps it.
+        // Always Automatic: the page's Cache size is hidden on tvOS (web patch 0030), and a size saved
+        // before then is ignored.
         // Automatic buffers 10 minutes ahead, which a remux needs to ride out a slow stretch of the
         // source: about 6 GB at 80 Mbit/s. The engine's own automatic (~40 s ahead) is a few hundred
         // MB of a remux, gone in one hiccup. The bytes are left to the engine's quarter of the free
@@ -330,11 +340,7 @@ final class AetherPlayer {
         // engine's software player keeps its packets in memory on tvOS, 96 MB ahead and 128 MB
         // behind, and neither changes anything there.
         // Live can't be read ahead of the broadcast, so it keeps the engine's own live window (nothing set).
-        if live {
-        } else if settings.cacheMb > 0 {
-            options.forwardBufferSegments = Self.cacheWindowSegments
-            options.sessionCacheByteBudget = settings.cacheMb * 1_000_000
-        } else {
+        if !live {
             options.forwardBufferSegments = Self.automaticWindowSegments
             // Without a budget, a window of 150 or fewer keeps the engine's 2 GiB cap, under 4 minutes
             // of a remux. Asking for more than any Apple TV holds leaves only the quarter-of-free-space
@@ -351,9 +357,6 @@ final class AetherPlayer {
         return options
     }
 
-    /// The engine's largest forward window (about 3 hours of 4 s segments): with a Cache size set, the
-    /// bytes bound the buffer, not this.
-    private static let cacheWindowSegments = 2700
     /// Automatic's forward window: 10 minutes of the engine's 4 s segments.
     private static let automaticWindowSegments = 150
 
@@ -560,6 +563,7 @@ final class AetherPlayer {
     }
 
     func stop() {
+        flushStartTiming()
         generation += 1
         holdingForLink = false
         loading?.cancel()
@@ -827,17 +831,78 @@ final class AetherPlayer {
     private var loadedAt: TimeInterval?
     private var seekBegan: TimeInterval?
     private var seekTarget: Double = 0
+    /// What happened during the current video's start, in order, in ms from the load: the engine's
+    /// startup checkpoints, its first `playing`, and each audio route change with the channels in use.
+    private var startMarks: [String] = []
+    private var routeWatch: NSObjectProtocol?
+
+    /// Notes a moment of the start for `logStartTiming`, while the start is under way.
+    private func markStart(_ what: String) {
+        guard let began = loadBegan else { return }
+        startMarks.append(String(format: "%@ %.0f", what, (ProcessInfo.processInfo.systemUptime - began) * 1000))
+    }
+
+    /// An audio route change during a start: where the HDMI link changes format (stereo PCM to Dolby, say).
+    private func watchRouteDuringStart() {
+        guard routeWatch == nil else { return }
+        routeWatch = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            let reason = raw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+            let channels = AudioOutput.channelsInUse
+            MainActor.assumeIsolated {
+                self?.markStart("audio route \(Self.reasonName(reason)) (\(channels) ch)")
+            }
+        }
+    }
+
+    private static func reasonName(_ reason: AVAudioSession.RouteChangeReason?) -> String {
+        switch reason {
+        case .newDeviceAvailable: return "new device"
+        case .oldDeviceUnavailable: return "device gone"
+        case .categoryChange: return "category"
+        case .override: return "override"
+        case .wakeFromSleep: return "wake"
+        case .noSuitableRouteForCategory: return "no route"
+        case .routeConfigurationChange: return "configuration"
+        default: return "change"
+        }
+    }
 
     /// One line for the first picture: where the start's time went. The engine's own `open timings` line
-    /// beside it splits the engine's load into connect, open and stream info.
+    /// beside it splits the engine's load into connect, open and stream info, and the marks say when the
+    /// probe, the display's mode switch, the play and the audio route's changes came.
+    ///
+    /// The line is written `startMarksAfterPicture` after the first picture, so it has the audio route's
+    /// changes as the sound starts (and `AudioOutput.playbackStarted`'s asks at 1, 3 and 6 s), or sooner
+    /// when the next video starts or the page stops this one.
     private func logStartTiming() {
-        guard let began = loadBegan else { return }
-        loadBegan = nil
+        guard let began = loadBegan, startTimingLine == nil else { return }
         let now = ProcessInfo.processInfo.systemUptime
         func ms(_ t: TimeInterval?) -> String { t.map { String(format: "%.0f", ($0 - began) * 1000) } ?? "-" }
-        EngineLogBook.note("[player] start timing (ms from the load): audio session ready \(ms(audioReadyAt)), "
+        startTimingLine = "[player] start timing (ms from the load): audio session ready \(ms(audioReadyAt)), "
             + "engine loaded \(ms(loadedAt)), first picture \(ms(now))"
-            + (holdingForLink ? ", held for the link" : ""))
+            + (holdingForLink ? ", held for the link" : "")
+        let generation = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.startMarksAfterPicture) { [weak self] in
+            guard let self, generation == self.generation else { return }
+            self.flushStartTiming()
+        }
+    }
+
+    /// The first picture's numbers, waiting for the marks that follow it.
+    private var startTimingLine: String?
+    private static let startMarksAfterPicture: TimeInterval = 8
+
+    /// Writes the start's line, if the video showed a picture, and ends the marks.
+    private func flushStartTiming() {
+        if let line = startTimingLine {
+            EngineLogBook.note(line + (startMarks.isEmpty ? "" : "; " + startMarks.joined(separator: ", ")))
+        }
+        startTimingLine = nil
+        startMarks = []
+        loadBegan = nil
     }
 
     /// One line for a seek: from the page's ask to the engine saying it is playing again.
@@ -1026,6 +1091,18 @@ final class AetherPlayer {
                     self.listener?.playerEvent("restart")
                 }
             }
+            .store(in: &watching)
+        // The engine's startup checkpoints (the probe, the display's mode switch, the session) and its
+        // first `playing`, for the start's line (`logStartTiming`).
+        engine.$startupProgress
+            .compactMap { $0?.checkpoint }
+            .removeDuplicates()
+            .sink { [weak self] checkpoint in self?.markStart("\(checkpoint)") }
+            .store(in: &watching)
+        engine.$state
+            .map { $0 == .playing }
+            .removeDuplicates()
+            .sink { [weak self] playing in if playing { self?.markStart("playing") } }
             .store(in: &watching)
         engine.$hasFirstFrameReadyForDisplay
             .removeDuplicates()
