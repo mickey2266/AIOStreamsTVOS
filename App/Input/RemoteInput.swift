@@ -92,7 +92,7 @@ final class RemoteInput {
     /// 900 and 800 before), past the longest full-length swipes measured (700 to 950): a swipe the
     /// length of the clickpad stays one row, and only an unusually long one moves two.
     private static let firstStepY: CGFloat = 280
-    private static let secondStepY: CGFloat = 1100
+    private static let secondStepY: CGFloat = 1000
     /// Across, half as sensitive again (was 150 and 280): a full-length swipe of about 1000 pt
     /// moves two posters.
     private static let firstStepX: CGFloat = 300
