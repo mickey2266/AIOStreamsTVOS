@@ -1,5 +1,5 @@
 diff --git a/packages/web/src/lib/input/focus.ts b/packages/web/src/lib/input/focus.ts
-index 4feafcb..2db5a49 100644
+index 925216d8..15bb6755 100644
 --- a/packages/web/src/lib/input/focus.ts
 +++ b/packages/web/src/lib/input/focus.ts
 @@ -147,6 +147,15 @@ function titleAbove(from: HTMLElement, dir: Direction): HTMLElement | null {
@@ -18,7 +18,25 @@ index 4feafcb..2db5a49 100644
  /** Down into a row from outside it, its title first. */
  function titleBelow(to: HTMLElement, from: HTMLElement, dir: Direction) {
    if (dir !== 'down') return null;
-@@ -902,7 +911,9 @@ export function move(dir: Direction): boolean {
+@@ -564,7 +573,16 @@ function entry(to: HTMLElement, from: HTMLElement): HTMLElement {
+   // From another group, as from one row to the next, the one beside it.
+   if (from.closest(GROUP) && !to.closest('[data-nav-resume]')) return to;
+   const last = lastIn.get(group);
+-  if (last && group.contains(last) && canFocus(last)) return last;
++  // A row's title isn't where its cards resume: Down passes a row still loading
++  // through its title, and Up onto its cards once they're in would land there
++  // again (AIOStreamsTVOS).
++  if (
++    last &&
++    group.contains(last) &&
++    canFocus(last) &&
++    !(inTitle(last) && !inTitle(to))
++  )
++    return last;
+   const row = rectOf(to);
+   const edge = group.getBoundingClientRect();
+   for (const el of group.querySelectorAll<HTMLElement>(FOCUSABLE)) {
+@@ -902,7 +920,9 @@ export function move(dir: Direction): boolean {
    // Any other way stays in such a box, as what it covers lies beside it.
    const within = exit && !out ? exit : root;
    // Up from a row's cards, its title, even where focus came down from the row above.
