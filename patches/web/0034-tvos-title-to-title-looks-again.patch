@@ -1,0 +1,31 @@
+diff --git a/packages/web/src/lib/input/focus.ts b/packages/web/src/lib/input/focus.ts
+index 4feafcb..2db5a49 100644
+--- a/packages/web/src/lib/input/focus.ts
++++ b/packages/web/src/lib/input/focus.ts
+@@ -147,6 +147,15 @@ function titleAbove(from: HTMLElement, dir: Direction): HTMLElement | null {
+   return titleOf(from.closest(GROUP));
+ }
+ 
++/**
++ * One row's title to another's: the way back is looked for again, not
++ * remembered. Down from a title passes a row still loading, whose cards can't
++ * take focus, straight to the next title; once the cards are in, going back
++ * would pass over them to the title (AIOStreamsTVOS).
++ */
++const titleToTitle = (from: Element, back: Element) =>
++  inTitle(from) && inTitle(back);
++
+ /** Down into a row from outside it, its title first. */
+ function titleBelow(to: HTMLElement, from: HTMLElement, dir: Direction) {
+   if (dir !== 'down') return null;
+@@ -902,7 +911,9 @@ export function move(dir: Direction): boolean {
+   // Any other way stays in such a box, as what it covers lies beside it.
+   const within = exit && !out ? exit : root;
+   // Up from a row's cards, its title, even where focus came down from the row above.
+-  let near = titleAbove(from, dir) ?? (back && canFocus(back) ? back : null);
++  let near =
++    titleAbove(from, dir) ??
++    (back && canFocus(back) && !titleToTitle(from, back) ? back : null);
+   // A box entered at its named element, as tabs at the picked one, has more of it to pass on the way back.
+   const entered = near && from.closest<HTMLElement>('[data-nav-enter]');
+   if (entered && !entered.contains(near)) {

@@ -481,7 +481,10 @@ Back behaviour and the bundled-player path. It also means:
 - A home row's name is a link to its whole catalog in Discover, which the page's remote navigation
   skips. Here it's a stop of its own above the row's posters: Up from any of them goes to it, Down
   into the row from above lands on it first, and Click opens the catalog
-  (`patches/web/0018-tvos-row-titles-open-catalog.patch`).
+  (`patches/web/0018-tvos-row-titles-open-catalog.patch`). Going back from one row's name to
+  another's looks for the way again rather than retracing the last move: Down passes a row that's
+  still loading straight to the next name, and once its posters are in, Up lands on them instead of
+  skipping them (`patches/web/0034-tvos-title-to-title-looks-again.patch`).
 - In the player, Click while the controls are hidden brings them up, with Play focused, rather than
   pausing or playing as the page does on other TVs; Play/Pause still pauses and plays
   (`patches/web/0021-tvos-select-shows-hidden-controls.patch`). While the skip button shows, Click
