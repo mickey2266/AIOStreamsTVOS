@@ -316,11 +316,13 @@ enum BridgeScript {
    * set by then: the app keeps the TV's mode for it rather than blanking to match a muted preview
    * (`LoadRequest.framed`).
    */
+  // Not `held`: that name is the held remote key's, above, and a second `let` of it is a syntax
+  // error that stops this whole script, and with it the page's storage, TV layout and remote.
   let framed = false;
-  let held = null;
+  let heldMessages = null;
   const flush = () => {
-    const messages = held;
-    held = null;
+    const messages = heldMessages;
+    heldMessages = null;
     if (framed) messages[0] = { ...messages[0], framed: true };
     for (const message of messages) post(message);
   };
@@ -334,9 +336,9 @@ enum BridgeScript {
         } catch {}
       }
     }
-    if (held) return void held.push(message);
+    if (heldMessages) return void heldMessages.push(message);
     if (message && message.type === 'player-load') {
-      held = [message];
+      heldMessages = [message];
       queueMicrotask(flush);
       return;
     }
