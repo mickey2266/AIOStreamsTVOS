@@ -302,7 +302,46 @@ enum BridgeScript {
   } catch {}
 
   const listeners = new Set();
-  const send = (message) => handler.postMessage(JSON.stringify(message));
+  const post = (message) => handler.postMessage(JSON.stringify(message));
+  /*
+   * A `player-frame` is in the page's pixels times its viewport scale (the page's `unzoomed`). The page
+   * asks a TV for a 1280-wide viewport, and whether WebKit scales that up to the screen is WebKit's to
+   * say, so the page's width in the same measure goes with it: the app maps the frame by the web
+   * view's width over this, whatever the page's scale (VideoStage).
+   */
+  /*
+   * A trailer that plays by itself in a card, the hero or a title page loads in one of the page's
+   * effects and is framed in the next, in the same turn. A load is held to the end of its turn, with
+   * whatever follows it in that turn, in order, and goes out marked `framed` when the page has a frame
+   * set by then: the app keeps the TV's mode for it rather than blanking to match a muted preview
+   * (`LoadRequest.framed`).
+   */
+  let framed = false;
+  let held = null;
+  const flush = () => {
+    const messages = held;
+    held = null;
+    if (framed) messages[0] = { ...messages[0], framed: true };
+    for (const message of messages) post(message);
+  };
+  const send = (message) => {
+    if (message && message.type === 'player-frame') {
+      framed = !!message.frame;
+      if (message.frame) {
+        try {
+          const scale = (window.visualViewport && window.visualViewport.scale) || 1;
+          message = { ...message, pageWidth: window.innerWidth * scale };
+        } catch {}
+      }
+    }
+    if (held) return void held.push(message);
+    if (message && message.type === 'player-load') {
+      held = [message];
+      queueMicrotask(flush);
+      return;
+    }
+    post(message);
+  };
 
   /*
    * tvOS can drop a web view's stored data between launches, and with it the
@@ -371,6 +410,10 @@ enum BridgeScript {
     // The page hides its player while the picture-in-picture window shows; the app's button in the
     // player starts the window (PictureInPicture.swift).
     pip: true,
+    // The app draws its video small where the page says (`player-frame`, VideoStage.swift): the
+    // page's mini player docked in a preview, and trailers that play by themselves in cards, the
+    // hero and title pages, which the page starts only where the player can be placed so.
+    miniPlayer: true,
     // Hides the Android settings this app can't honour (patches/web/0007): the Android app section
     // (updates, picture-in-picture, background play, mpv.conf), the engine, tunneling, frame-rate
     // matching (tvOS's own Match Content) and passthrough.

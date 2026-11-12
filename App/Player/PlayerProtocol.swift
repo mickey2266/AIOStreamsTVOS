@@ -28,6 +28,10 @@ struct LoadRequest {
     /// The server says it's live (a Live TV channel's `IsInfiniteStream`). False isn't a promise: an
     /// add-on's stream may be live without saying so, which `LiveHLS` finds out.
     let live: Bool
+    /// Drawn in a box of the page from its start (a trailer playing by itself in a card, the hero or a title
+    /// page), as the bridge script marks a load the page framed in the same turn (VideoStage). The TV keeps
+    /// its mode for it: a muted preview isn't worth the screen blanking for Match Content.
+    var framed = false
 
     /// A trailer, from YouTube (`YouTube.resolve`), whose streams all come from googlevideo.com.
     var isTrailer: Bool {
@@ -120,7 +124,8 @@ enum PlayerProtocol {
             audioLanguages: try languages(message["audioLanguages"]),
             subtitleLanguages: try languages(message["subtitleLanguages"]),
             subtitleMode: message.text("subtitleMode").flatMap(SubtitleMode.init(rawValue:)) ?? .default,
-            live: message.flag("live") == true
+            live: message.flag("live") == true,
+            framed: message.flag("framed") == true
         )
     }
 

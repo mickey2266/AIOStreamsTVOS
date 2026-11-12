@@ -281,6 +281,10 @@ final class AetherPlayer {
         if let manager = view.window?.avDisplayManager {
             options.matchContentEnabled = manager.isDisplayCriteriaMatchingEnabled
         }
+        // A video drawn in a box of the page (a trailer playing by itself, `LoadRequest.framed`): the TV stays in
+        // the mode it's in rather than blanking to match a muted preview. The engine writes no criteria and
+        // waits for none (AE#842's `.host`); the same session shown whole afterwards keeps that mode too.
+        if request.framed { options.displayCriteriaOwner = .host }
         // TrueHD, DTS and DTS-HD can't leave an Apple TV as a bitstream, so they're decoded and reach
         // the receiver as multichannel PCM, up to 7.1, as Infuse plays them: TrueHD Atmos and DTS:X
         // as their 7.1, without the objects and heights, unless the page's Object audio switch is on

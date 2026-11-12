@@ -274,6 +274,17 @@ YouTube trailers play in the player. The app asks YouTube's player API for the v
 AIOStreams' desktop and Android apps do (`App/Player/YouTube.swift`). Where YouTube gives none,
 the page opens the trailer's link, which goes to the YouTube app if it's installed.
 
+Trailers also **play by themselves** in a card you rest on, the hero and title pages (Settings →
+Interface → Trailers), and the **mini player** plays on in a page's preview. Both draw the app's
+video in a box of the page: the page sends the box (`player-frame`), the app moves the video and its
+subtitles there under the page, and cuts a rounded hole through the page where it should show
+(`App/Player/VideoStage.swift`), as the Android app does. The bridge says it can (`miniPlayer`);
+without that the page never starts a trailer by itself. A trailer that plays in a box keeps the
+TV's display mode rather than switching it for Match Content (the bridge marks such a load
+`framed`), so resting on a card never blanks the screen. A TV has no corner card to drag, so the
+app sends the page no taps or drags on the video; the remote's presses reach the page as keys.
+tvOS's **Reduce Motion** stops trailers from starting by themselves, as the page asks.
+
 ### Seek-bar thumbnails
 
 Seeking shows a picture of the keyframe at or before the position, over the seek bar and in the
