@@ -180,10 +180,20 @@ final class RemoteInput {
             guard let key = Self.key(for: press.type) else { return }
             let arrow = Self.isArrow(press.type)
             if began {
-                if arrow, partOfSwipe, !slidToEdge(press.type) {
-                    dropped.insert(press.type)
-                    note("dropped (part of a swipe)", press.type)
-                    return
+                if arrow, partOfSwipe {
+                    if !clickDuringDrift {
+                        dropped.insert(press.type)
+                        note("dropped (part of a swipe)", press.type)
+                        return
+                    }
+                    note("taken (the thumb drifted without stepping)", press.type)
+                    // The drift is over: the swipe starts again from the click, so it can't step after it.
+                    if touchSwiping {
+                        swipeAnchor = touchAt
+                        lastAt = touchAt
+                        resetSteps()
+                        touchSwiping = false
+                    }
                 }
                 // A dropped press whose end never came mustn't swallow this one's.
                 dropped.remove(press.type)
@@ -223,23 +233,22 @@ final class RemoteInput {
     }
 
     /*
-     * A thumb resting on the clickpad slides toward an edge before it clicks: past `swipeIntent`, so
-     * it counts as a swipe, but short of a step, so the swipe did nothing. The click that follows is
-     * the only thing the thumb did, and dropping it as a swipe's stray arrow made Up seem ignored.
-     * A swipe that stepped, or that went another way than the arrow, still owns its arrow.
+     * A thumb resting on the clickpad drifts before it clicks: past `swipeIntent`, so it counts as a
+     * swipe, but short of a step, so the swipe did nothing. The remote log showed Up dropped after the
+     * thumb had drifted 130 and 204 pt down without a step, either way from the edge it then clicked.
+     * The arrow a swipe brings with it from an edge begins as the swipe begins, before the finger has
+     * gone far (it's held back then, and `swipeStarted` drops it), so an arrow that begins once a swipe
+     * has gone `driftClick` without stepping is a click. A swipe that stepped still owns its arrows.
      */
-    private func slidToEdge(_ type: UIPress.PressType) -> Bool {
+    private var clickDuringDrift: Bool {
         guard !swipeStepped else { return false }
-        let dx = touchAt.x - swipeAnchor.x
-        let dy = touchAt.y - swipeAnchor.y
-        switch type {
-        case .upArrow: return dy < 0 && -dy >= abs(dx)
-        case .downArrow: return dy > 0 && dy >= abs(dx)
-        case .leftArrow: return dx < 0 && -dx >= abs(dy)
-        case .rightArrow: return dx > 0 && dx >= abs(dy)
-        default: return false
-        }
+        // Just after a swipe that ended without a step: the thumb lifted and clicked.
+        guard touchDown else { return true }
+        return max(abs(touchAt.x - swipeAnchor.x), abs(touchAt.y - swipeAnchor.y)) >= Self.driftClick
     }
+
+    /// How far a swipe must have drifted, without a step, before an arrow beginning during it is a click.
+    private static let driftClick: CGFloat = 80
 
     /// How far the finger has gone from `from` other than toward the arrow's edge: a thumb rolling onto
     /// the edge it presses is the click, while one moving along or away from it is a swipe.
