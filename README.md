@@ -285,6 +285,11 @@ TV's display mode rather than switching it for Match Content (the bridge marks s
 app sends the page no taps or drags on the video; the remote's presses reach the page as keys.
 tvOS's **Reduce Motion** stops trailers from starting by themselves, as the page asks.
 
+The hero's trailer never started, here or in the official apps: the home page's copy of each title
+lists no trailers (`RemoteTrailers: []`), and the page took that empty list for the answer before
+the title's details, which do list them, had come. It now waits for the details unless the row's
+copy names some (`patches/web/0037-tvos-trailers-wait-for-the-details.patch`).
+
 ### Seek-bar thumbnails
 
 Seeking shows a picture of the keyframe at or before the position, over the seek bar and in the
