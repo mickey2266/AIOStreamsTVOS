@@ -1733,9 +1733,22 @@ final class AetherPlayer {
         if let upscale = engine.activeUpscale {
             let from = "\(Int(upscale.sourceSize.width))x\(Int(upscale.sourceSize.height))"
             let to = "\(Int(upscale.targetSize.width))x\(Int(upscale.targetSize.height))"
-            var line = "\(from) to \(to)"
-            if let ml = upscale.mlScale { line += String(format: ", super resolution %.0fx", ml) }
-            if upscale.degraded { line += ", without MetalFX" }
+            // The stages that ran, spelled out. MetalFX scales what the super resolution leaves short of the
+            // target; once the engine drops it (over its frame budget, and then for the whole run of the app),
+            // the target is the super resolution's own size. Both sizes are even, as the engine's plan makes them.
+            var stages: [String] = []
+            if let ml = upscale.mlScale { stages.append(String(format: "super resolution %.0fx", ml)) }
+            let reached = upscale.mlScale.map { ml in
+                Int((Float(upscale.sourceSize.width) * ml).rounded(.down)) & ~1 == Int(upscale.targetSize.width)
+                    && Int((Float(upscale.sourceSize.height) * ml).rounded(.down)) & ~1 == Int(upscale.targetSize.height)
+            } ?? false
+            if !reached { stages.append("MetalFX") }
+            var line = "\(from) to \(to): " + stages.joined(separator: " then ")
+            if upscale.degraded {
+                line += " (MetalFX dropped: the stage ran over its frame budget)"
+            } else if reached {
+                line += " (reached the target, so MetalFX wasn't needed)"
+            }
             if let reason = upscale.disabledReason { line = "off (\(reason)), was \(line)" }
             stats["upscaling"] = line
         } else if loadedUpscaling {
