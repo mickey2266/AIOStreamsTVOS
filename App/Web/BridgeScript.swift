@@ -186,6 +186,44 @@ enum BridgeScript {
       '{background:linear-gradient(to ' + dir + ',var(--background),' + mid + ',transparent)!important}';
     const SIDE = "[data-ui='hero-shade'][data-name='side']";
     const TRAILER_SIDE = "[class*='[mask-image:linear-gradient(to_right,black,rgb(0_0_0/0.6)_30%']";
+    const TRAILER_BOTTOM = "[class*='[mask-image:linear-gradient(to_top,black,rgb(0_0_0/0.6)_30%']";
+    const TRAILER_TOP = "[class*='[mask-image:linear-gradient(to_bottom,rgb(0_0_0/0.7),transparent)]']";
+    const NO_MASK = '{-webkit-mask-image:none!important;mask-image:none!important}';
+    /*
+     * With EFFECTS on, a title page still drew three masks the size of the screen: the backdrop's
+     * 2px bottom edge, the frame inside it (its 12rem fade in at the start), and the bottom shade.
+     * WebKit draws each into a surface of its own at 2x, and with the version picker opening as the
+     * page scrolled to its episodes, the page's process was ended for memory again. Each of these
+     * fades art into the page's own colour, and so does that colour drawn over it as a gradient:
+     * the same pixels, with no surface. The shades are drawn so always (with the artwork background
+     * on they're transparent either way); the art's own fades only while the page's colour is under
+     * it, as with the artwork background they fade into the moving wash, which needs the mask.
+     */
+    const SOLID = "html:not([data-art-wash]) ";
+    const edge = (dir, size) =>
+      "{content:'';position:absolute;pointer-events:none;" + size +
+      ';background:linear-gradient(to ' + dir + ',var(--background),transparent)}';
+    const solidFades = [
+      [SIDE, TRAILER_SIDE, TRAILER_BOTTOM, TRAILER_TOP,
+        "[data-ui='hero-shade'][data-name='bottom']", "[data-ui='item-backdrop-shade'][data-name='bottom']"]
+        .join(',') + NO_MASK,
+      "[data-ui='item-backdrop-shade'][data-name='bottom']" + shade('top', mix(70)),
+      SIDE + shade('right', mix(70) + ' 35%'),
+      "html[dir='rtl'] " + SIDE + shade('left', mix(70) + ' 35%'),
+      "[data-ui='hero-shade'][data-name='bottom']" + shade('top', mix(60)),
+      TRAILER_SIDE + shade('right', mix(60) + ' 30%'),
+      "html[dir='rtl'] " + TRAILER_SIDE + shade('left', mix(60) + ' 30%'),
+      TRAILER_BOTTOM + shade('top', mix(60) + ' 30%'),
+      TRAILER_TOP + '{background:linear-gradient(to bottom,' + mix(70) + ',transparent)!important}',
+      [SOLID + "[data-ui='item-backdrop']", SOLID + "[data-ui='hero-art']", SOLID + "[data-ui='backdrop-frame']"]
+        .join(',') + NO_MASK,
+      [SOLID + "[data-ui='item-backdrop']::after", SOLID + "[data-ui='hero-art']::after"].join(',') +
+        edge('top', 'left:0;right:0;bottom:0;height:2px'),
+      SOLID + "[data-ui='backdrop-frame']::after" + edge('right', 'top:0;bottom:0;left:0;width:12rem'),
+      "html[dir='rtl']:not([data-art-wash]) [data-ui='backdrop-frame']::after" +
+        edge('left', 'top:0;bottom:0;right:0;left:auto;width:12rem'),
+    ];
+    rules.push(...solidFades);
     /*
      * Frosted and liquid glass (Theme > Glass surface: the navigation, and with Glass panels on, the
      * menus, dialogs and settings cards over the artwork background) are a thin fill over a
@@ -205,16 +243,7 @@ enum BridgeScript {
         'html:not([data-blur-spoilers]) *,html[data-blur-spoilers] *:not(' + SPOILERS + '),' +
           '*::before,*::after{filter:none!important}',
         '*:not(' + GLASS + '),*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}',
-        '*:not(' + HOLE + '):not(' + ART_FADES + '),*::before,*::after{-webkit-mask-image:none!important;mask-image:none!important}',
-        "[data-ui='item-backdrop-shade'][data-name='bottom']" + shade('top', mix(70)),
-        SIDE + shade('right', mix(70) + ' 35%'),
-        "html[dir='rtl'] " + SIDE + shade('left', mix(70) + ' 35%'),
-        "[data-ui='hero-shade'][data-name='bottom']" + shade('top', mix(60)),
-        TRAILER_SIDE + shade('right', mix(60) + ' 30%'),
-        "html[dir='rtl'] " + TRAILER_SIDE + shade('left', mix(60) + ' 30%'),
-        "[class*='[mask-image:linear-gradient(to_top,black,rgb(0_0_0/0.6)_30%']" + shade('top', mix(60) + ' 30%'),
-        "[class*='[mask-image:linear-gradient(to_bottom,rgb(0_0_0/0.7),transparent)]']" +
-          '{background:linear-gradient(to bottom,' + mix(70) + ',transparent)!important}'
+        '*:not(' + HOLE + '):not(' + ART_FADES + '),*::before,*::after{-webkit-mask-image:none!important;mask-image:none!important}'
       );
     if (rules.length) {
       const style = document.createElement('style');
