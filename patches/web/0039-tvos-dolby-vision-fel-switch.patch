@@ -1,0 +1,62 @@
+diff --git a/packages/web/src/app/settings/playback.tsx b/packages/web/src/app/settings/playback.tsx
+index 4b15ab0..5cae2af 100644
+--- a/packages/web/src/app/settings/playback.tsx
++++ b/packages/web/src/app/settings/playback.tsx
+@@ -422,6 +422,7 @@ export function PlaybackSection() {
+             value={dolbyVision}
+             onValueChange={setDolbyVision}
+           />
++          {appleTv() && dolbyVision && <DolbyVisionFelSwitch />}
+           {canUpscale() && <UpscalingSwitch />}
+           {appleTv() && <OtherUpscalingSwitch />}
+           {androidTv && (
+@@ -540,6 +541,23 @@ function OtherUpscalingSwitch() {
+   );
+ }
+ 
++/**
++ * The Apple TV app's Dolby Vision Profile 7 FEL switch (`settings.video.dolbyVisionFel`, AIOStreamsTVOS).
++ * Shown only under the Dolby Vision switch, which it depends on. In English only, as the help above.
++ */
++function DolbyVisionFelSwitch() {
++  const [fel, setFel] = useSetting(settings.video.dolbyVisionFel);
++  return (
++    <Switch
++      side="right"
++      label="Dolby Vision profile 7 FEL"
++      help="Plays profile 7 videos with a full enhancement layer (some UHD Blu-ray remuxes) with that layer folded into the picture's brightness curves, so a Dolby Vision TV shows more of the disc's detail. Starts and seeks take a little longer."
++      value={fel}
++      onValueChange={setFel}
++    />
++  );
++}
++
+ function PlayerCard() {
+   const [player, setPlayer] = useSetting(settings.player.choice);
+   const [link, setLink] = useSetting(settings.player.link);
+diff --git a/packages/web/src/lib/hosts/shell/player.ts b/packages/web/src/lib/hosts/shell/player.ts
+index 5fda57d..e6a8e78 100644
+--- a/packages/web/src/lib/hosts/shell/player.ts
++++ b/packages/web/src/lib/hosts/shell/player.ts
+@@ -553,6 +553,8 @@ export function playerSettings() {
+       objectAudio: audio.objectAudio.read(),
+       objectAudioLayout: audio.objectAudioLayout.read(),
+       upscalingAnime: upscalingAnime(),
++      // Only with Dolby Vision on: the switch is hidden without it, and a stored choice is ignored.
++      dolbyVisionFel: video.dolbyVision.read() && video.dolbyVisionFel.read(),
+     }),
+     ...(android
+       ? {
+diff --git a/packages/web/src/lib/settings/index.ts b/packages/web/src/lib/settings/index.ts
+index 8ee5d70..6fc297d 100644
+--- a/packages/web/src/lib/settings/index.ts
++++ b/packages/web/src/lib/settings/index.ts
+@@ -645,6 +645,8 @@ export const settings = {
+     upscaling: device<boolean>('aiostreams-web-video-upscaling', false),
+     /** The Apple TV app's upscaling of everything that isn't anime (AIOStreamsTVOS). */
+     upscalingOther: device<boolean>('aiostreams-web-video-upscaling-other', false),
++    /** The Apple TV app folds a Dolby Vision profile 7 FEL video's enhancement layer into its curves (AIOStreamsTVOS). */
++    dolbyVisionFel: device<boolean>('aiostreams-web-video-dolby-vision-fel', false),
+     hdrOutput: device<boolean>('aiostreams-web-video-hdr-output', false),
+   },
+   audio: {

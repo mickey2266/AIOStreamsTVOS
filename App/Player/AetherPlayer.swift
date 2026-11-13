@@ -340,7 +340,12 @@ final class AetherPlayer {
         // engine logs one `[Upscale]` line why. A trailer plays as it is: it's short, mostly full size, and
         // a muted preview in a card.
         options.upscalesLowResolutionVideo = settings.upscaling && !live && !request.isTrailer
+        // Anime plays through the engine's line-art scaler (Anime4K mode A, small, since engine 7.63): it
+        // also takes 1080p and 10-bit SDR, which the automatic route can't. Anything else keeps the
+        // automatic route. It is for drawn content only, so it follows the page's anime test.
+        options.upscaleScaler = settings.upscalingAnime ? .lineArt : .automatic
         loadedUpscaling = options.upscalesLowResolutionVideo
+        loadedLineArt = settings.upscalingAnime
         if !settings.hardwareDecoding { options.preferredDecodePath = .software }
         // Dolby Vision plays as its HDR10 / HLG base layer, HDR10+ metadata included, on a TV without Dolby
         // Vision always and on a Dolby Vision TV when the page's Dolby Vision switch is off: no Profile 7 ->
@@ -349,6 +354,16 @@ final class AetherPlayer {
         if !settings.dolbyVision || !AetherEngine.displayCapabilities.supportsDolbyVision {
             options.dolbyVisionHandling = .baseLayerOnly
         }
+        // The page's Dolby Vision profile 7 FEL switch (patches/web/0039), off by default and only with Dolby
+        // Vision on. A profile 7 video with a full enhancement layer stays on the native route, converted to
+        // single-layer 8.1 as always; with the switch on, the engine also folds the enhancement layer's luma
+        // residual into the 8.1 RPU's luma curve per scene, so the TV's own Dolby Vision decoder applies most
+        // of its effect (`DolbyVisionFelCurves`, AE#988). The fold is on by default in an engine built with
+        // that trait, so the switch has to turn it off. It holds a GOP back between demuxer and segmenter,
+        // so a start or a seek is slower than with it off (AE#1018 measured 0.5 to 4 s on an Apple TV 4K),
+        // and the engine pauses it by itself where the TV can't use it (a display without Dolby Vision).
+        // The audio stays AVPlayer's, so Atmos objects keep playing.
+        options.foldsDolbyVisionFEL = settings.dolbyVision && settings.dolbyVisionFel
         // Always Automatic: the page's Cache size is hidden on tvOS (web patch 0030), and a size saved
         // before then is ignored.
         // Automatic buffers 10 minutes ahead, which a remux needs to ride out a slow stretch of the
@@ -366,6 +381,11 @@ final class AetherPlayer {
             options.sessionCacheByteBudget = 1 << 40
         }
         options.heldSourceConnection = Self.heldSourceConnection
+        // Each VOD segment is served while it is still being written, so playback starts on its first
+        // fragments instead of after the whole segment. The engine measured the first frame at 0.9 s
+        // against 2.2 s over a 6 Mbit/s origin, with fewer early rebuffers. It is off by default in the
+        // engine, and ignored for live, `nativeRemoteHLS` and the software player.
+        options.progressiveSegmentDelivery = !live
         openedHeld = options.heldSourceConnection
         // ASS and SSA cues come as their event lines, for libass (`SubtitleOverlay`); other formats are unaffected.
         options.preserveASSMarkup = true
@@ -987,6 +1007,8 @@ final class AetherPlayer {
 
     /// What the playing video was loaded with for `upscalesLowResolutionVideo`.
     private var loadedUpscaling = false
+    /// And whether it asked for the line-art scaler (`upscaleScaler`).
+    private var loadedLineArt = false
 
     /**
      * The page's upscaling changed for what plays (its shortcut, Anime upscaling or Upscale other video,
@@ -997,14 +1019,19 @@ final class AetherPlayer {
     private func applyUpscaling() {
         guard let request = current, !ended, !engine.isLive, !request.isTrailer else { return }
         let wanted = settings.upscaling
-        guard wanted != loadedUpscaling else { return }
+        let lineArt = settings.upscalingAnime
+        guard wanted != loadedUpscaling || (wanted && lineArt != loadedLineArt) else { return }
         loadedUpscaling = wanted
+        loadedLineArt = lineArt
         let generation = generation
         let name = URL(string: request.url).map(Self.shortened) ?? "the video"
-        EngineLogBook.note("[player] upscaling \(wanted ? "on" : "off") for \(name)")
+        EngineLogBook.note("[player] upscaling \(wanted ? (lineArt ? "on, line art" : "on") : "off") for \(name)")
         Task { [weak self] in
             do {
-                try await self?.engine.reloadAtCurrentPosition { $0.upscalesLowResolutionVideo = wanted }
+                try await self?.engine.reloadAtCurrentPosition {
+                    $0.upscalesLowResolutionVideo = wanted
+                    $0.upscaleScaler = lineArt ? .lineArt : .automatic
+                }
                 guard let self, generation == self.generation else { return }
                 if self.paused { self.engine.pause() } else { self.engine.play() }
             } catch is CancellationError {
@@ -1822,6 +1849,14 @@ final class AetherPlayer {
         }
         let from = "\(Int(upscale.sourceSize.width))x\(Int(upscale.sourceSize.height))"
         let to = "\(Int(upscale.targetSize.width))x\(Int(upscale.targetSize.height))"
+        if upscale.scaler == .lineArt {
+            // Anime4K's own networks, 2x, then a resample to the target where 2x doesn't land on it. When
+            // it overruns the frame budget the engine drops its restore pass first, then falls back to
+            // the automatic route or switches off, and `degraded` isn't about MetalFX here.
+            var line = "\(from) to \(to): Anime4K line art 2x"
+            if let reason = upscale.disabledReason { line = "off (\(reason)), was \(line)" }
+            return line
+        }
         var stages: [String] = []
         if let ml = upscale.mlScale { stages.append(String(format: "super resolution %.0fx", ml)) }
         let reached = upscale.mlScale.map { ml in

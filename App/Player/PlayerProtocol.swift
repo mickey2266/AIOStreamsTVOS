@@ -110,6 +110,13 @@ struct PlayerSettings: Equatable {
     /// its Anime upscaling, for anything else its Upscale other video (patches/web/0033), or as its
     /// shortcut set it for this video.
     var upscaling = false
+    /// The title is anime, by the page's own test above (patches/web/0038): the engine's line-art scaler
+    /// (Anime4K) then does the upscaling, which suits drawn content only. Anything else, or a page that
+    /// doesn't send it, keeps the automatic scaler.
+    var upscalingAnime = false
+    /// The page's Dolby Vision profile 7 FEL switch (patches/web/0039): fold such a video's enhancement layer into its curves.
+    /// The page sends it false while its Dolby Vision switch is off, and `AetherPlayer.options` checks again.
+    var dolbyVisionFel = false
 }
 
 enum PlayerProtocol {
@@ -195,6 +202,8 @@ enum PlayerProtocol {
         settings.objectAudio = message.flag("objectAudio") == true
         settings.objectAudioLayout = message.text("objectAudioLayout") == "9.1.6" ? .l916 : .l714
         settings.upscaling = message.flag("upscaling") == true
+        settings.upscalingAnime = message.flag("upscalingAnime") == true
+        settings.dolbyVisionFel = message.flag("dolbyVisionFel") == true
         // The page still sends its Cache size (`cacheMb`); the player always buffers as Automatic.
         return settings
     }

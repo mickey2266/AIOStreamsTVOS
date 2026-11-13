@@ -1,0 +1,38 @@
+diff --git a/packages/web/src/lib/hosts/shell/player.ts b/packages/web/src/lib/hosts/shell/player.ts
+index 851d93f..311fd69 100644
+--- a/packages/web/src/lib/hosts/shell/player.ts
++++ b/packages/web/src/lib/hosts/shell/player.ts
+@@ -14,7 +14,7 @@ import {
+   subtitleScale,
+ } from '@/lib/subtitles/style';
+ import { parseChapters } from '@/lib/playback/chapters';
+-import { upscalingOn } from '@/lib/playback/upscaling';
++import { upscalingAnime, upscalingOn } from '@/lib/playback/upscaling';
+ import type { Span } from '@/lib/subtitles/align';
+ import {
+   ownTrackLabel,
+@@ -542,6 +542,7 @@ export function playerSettings() {
+     ...(appleTv() && {
+       objectAudio: audio.objectAudio.read(),
+       objectAudioLayout: audio.objectAudioLayout.read(),
++      upscalingAnime: upscalingAnime(),
+     }),
+     ...(android
+       ? {
+diff --git a/packages/web/src/lib/playback/upscaling.ts b/packages/web/src/lib/playback/upscaling.ts
+index 16f93ee..e12c99f 100644
+--- a/packages/web/src/lib/playback/upscaling.ts
++++ b/packages/web/src/lib/playback/upscaling.ts
+@@ -37,6 +37,12 @@ export const upscalingOn = () =>
+     ? settings.video.upscaling.read()
+     : appleTv() && settings.video.upscalingOther.read());
+ 
++/**
++ * Whether what plays is anime, by the test the Anime upscaling setting goes by. The Apple TV app takes
++ * its line-art scaler (Anime4K) from it, which suits drawn content only (AIOStreamsTVOS).
++ */
++export const upscalingAnime = () => anime;
++
+ export function pickUpscaling(on: boolean): void {
+   picked = on;
+   changed();

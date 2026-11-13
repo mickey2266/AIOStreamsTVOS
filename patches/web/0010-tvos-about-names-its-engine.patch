@@ -34,7 +34,7 @@ index e41938f9..8a1d3e89 100644
        ? [
            { name: 'mpv', help: t`Plays the video.`, url: 'https://mpv.io' },
            {
-@@ -188,3 +195,52 @@ function credits(
+@@ -188,3 +195,57 @@ function credits(
        : []),
    ];
  }
@@ -84,6 +84,11 @@ index e41938f9..8a1d3e89 100644
 +    name: 'VideoToolbox',
 +    help: "Apple's hardware decoder, for HEVC, H.264 and the Apple TV's other formats.",
 +    url: 'https://developer.apple.com/documentation/videotoolbox',
++  },
++  {
++    name: 'Anime4K',
++    help: "Upscales anime in the engine's line-art scaler.",
++    url: 'https://github.com/bloc97/Anime4K',
 +  },
 +];
 +/* eslint-enable lingui/no-unlocalized-strings */

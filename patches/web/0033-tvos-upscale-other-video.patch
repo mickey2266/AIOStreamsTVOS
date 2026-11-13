@@ -24,7 +24,7 @@ index 38fa1d22..e5b7d34a 100644
 +    <Switch
 +      side="right"
 +      label="Upscale other video"
-+      help="Upscales films and shows that aren't anime the same way, below 1080p, from tvOS 26: older and lower-resolution videos look sharper, though faces and fine detail can look smoothed. HDR and Dolby Vision videos, videos about as large as the screen, live channels and trailers stay as they are. Switching it during a video reopens the video where it is."
++      help="Upscales films and shows that aren't anime with the Apple TV's super resolution, below 1080p, from tvOS 26: older and lower-resolution videos look sharper, though faces and fine detail can look smoothed. HDR and Dolby Vision videos, videos about as large as the screen, live channels and trailers stay as they are. Switching it during a video reopens the video where it is."
 +      value={other}
 +      onValueChange={setOther}
 +    />

@@ -8,10 +8,10 @@ index 1ed8b6de..1f6e8aa2 100644
        label={t`Anime upscaling`}
 -      help={t`Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles your catalogs mark as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are.`}
 +      help={
-+        // The Apple TV app upscales with the Apple TV's own super resolution, not the anime shaders (AIOStreamsTVOS).
++        // The Apple TV app upscales anime with the engine's Anime4K line-art scaler, not the official app's anime shaders (AIOStreamsTVOS).
 +        // In English only, as a plain string: the build compiles t`` to an id, which shows as itself without a translation.
 +        appleTv()
-+          ? "Upscales anime below 1080p to the screen as it plays, with the Apple TV's super resolution, for sharper lines in older and lower-resolution shows. It applies to titles your catalogs mark as anime, and needs tvOS 26 or later. HDR and Dolby Vision videos, videos about as large as the screen, and live channels stay as they are. Turns itself off for a video the Apple TV can't keep up with. Switching it during a video reopens the video where it is."
++          ? "Upscales anime up to 1080p to the screen as it plays, with Anime4K's line-art networks, for sharper lines in older and lower-resolution shows. It applies to titles your catalogs mark as anime, and needs tvOS 26 or later. HDR and Dolby Vision videos, videos about as large as the screen, and live channels stay as they are. Turns itself off for a video the Apple TV can't keep up with. Switching it during a video reopens the video where it is."
 +          : t`Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles your catalogs mark as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are.`
 +      }
        value={upscaling}
