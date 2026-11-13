@@ -224,9 +224,67 @@ enum BridgeScript {
   } catch {}
   // When the last slide that is still running ends, so the artwork sweep below can wait for it.
   let slidingUntil = 0;
+  /*
+   * "Background from artwork" fades each new background in over the last with an opacity
+   * animation on a canvas behind the whole page (upstream's components/shell/art-wash.tsx). While
+   * it runs, WebKit makes that canvas a layer of its own, the screen's size at 2x, and with it
+   * every part of the page drawn over it, so they stay above it. Resting on card after card started
+   * fade after fade, and the page's process was ended for memory with only its usual pictures
+   * held (116 MB in 66). Here the fade is stepped from the page each frame instead, on the same
+   * curve, which WebKit draws without making layers for it.
+   */
+  const ART_FADES_STEPPED = true;
+  // CSS's `ease-out`, cubic-bezier(0, 0, 0.58, 1): the progress at `x` of the time, found by bisection.
+  const easeOut = (x) => {
+    const at = (t, a, b) => 3 * a * t * (1 - t) * (1 - t) + 3 * b * t * t * (1 - t) + t * t * t;
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 20; i++) {
+      const t = (lo + hi) / 2;
+      if (at(t, 0, 0.58) < x) lo = t;
+      else hi = t;
+    }
+    return at((lo + hi) / 2, 0, 1);
+  };
+  const stepping = new WeakMap();
+  /** Fades `el`'s opacity from 0 to 1 over `duration` ms, frame by frame, as `animate` would. */
+  const stepFadeIn = (el, duration) => {
+    stepping.get(el)?.();
+    let done;
+    const finished = new Promise((resolve) => (done = resolve));
+    let frame = 0;
+    const stop = () => {
+      cancelAnimationFrame(frame);
+      stepping.delete(el);
+      // With no fill, an ended animation leaves the element's own opacity.
+      el.style.removeProperty('opacity');
+      done();
+    };
+    stepping.set(el, stop);
+    el.style.opacity = '0';
+    const start = performance.now();
+    const step = (now) => {
+      const x = Math.min(1, (now - start) / duration);
+      if (x >= 1) return stop();
+      el.style.opacity = String(easeOut(x));
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return { finished, cancel: stop, finish: stop };
+  };
+  const artFade = (el, keyframes, options) =>
+    ART_FADES_STEPPED &&
+    el.tagName === 'CANVAS' &&
+    !!el.closest?.("[data-ui='art-wash']") &&
+    Array.isArray(keyframes) &&
+    keyframes.length === 2 &&
+    keyframes[0]?.opacity === 0 &&
+    keyframes[1]?.opacity === 1 &&
+    typeof options?.duration === 'number';
   try {
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (keyframes, options) {
+      if (artFade(this, keyframes, options)) return stepFadeIn(this, options.duration);
       const glide = !!(this.hasAttribute && this.hasAttribute('data-glide-layer'));
       if (glide && (!SLIDES || holding())) return animate.call(this, keyframes, { duration: 0 });
       const duration = typeof options === 'number' ? options : options?.duration;
