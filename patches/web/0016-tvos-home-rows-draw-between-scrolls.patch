@@ -4,7 +4,7 @@ index dc759a05..a6a7dc59 100644
 +++ b/packages/web/src/app/home/page.tsx
 @@ -40,6 +40,7 @@ import { href, itemPath, navigate, to, versionsPath } from '@/lib/paths';
  import { settings, useSetting, type FeaturedSource } from '@/lib/settings';
- import { useFeature } from '@/lib/jellyfin/server-info';
+ import { useFeature, useServerInfo } from '@/lib/jellyfin/server-info';
  import { useNear } from '@/hooks/use-in-view';
 +import { whenStill } from '@/lib/input/glide';
  import { FollowHero, Hero } from '@/components/media/hero';
@@ -35,10 +35,11 @@ index dc759a05..a6a7dc59 100644
  /** Favourite channels, then those played here lately, with what is on. */
  function LiveRow() {
    const view = useLiveTvView();
-@@ -391,17 +410,23 @@ function LiveRow() {
+@@ -392,20 +411,26 @@ function LiveRow() {
   */
  function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
    const { client } = useSession();
+   const { stock } = useServerInfo();
 -  const [ref, near] = useNear<HTMLElement>('400px', first);
 +  // A TV starts a row a screen ahead, so it's drawn between presses rather than as it scrolls in.
 +  const [ref, nearNow] = useNear<HTMLElement>(
@@ -51,6 +52,8 @@ index dc759a05..a6a7dc59 100644
      recursive: true,
      pageSize: ROW_PAGE,
      enabled: near,
+     // A catalog's order is its own; a server's own files show newest first.
+     ...(stock && { sortBy: NEWEST, descending: true }),
    });
 -  const items = React.useMemo(
 +  const fetched = React.useMemo(

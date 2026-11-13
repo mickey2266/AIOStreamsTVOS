@@ -25,4 +25,4 @@ index 7d7ac74c..24a4d6a1 100644
 +          )}
          </>
        )}
-       {launched && (
+       {mayConvert(user) && !launched && !preset && player !== CUSTOM_LINK && (

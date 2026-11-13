@@ -25,10 +25,11 @@ diff --git a/packages/web/src/lib/jellyfin/queries.ts b/packages/web/src/lib/jel
 index 043c7dfd..a0ca11b1 100644
 --- a/packages/web/src/lib/jellyfin/queries.ts
 +++ b/packages/web/src/lib/jellyfin/queries.ts
-@@ -21,6 +21,21 @@ import type {
- } from './types';
+@@ -24,6 +24,22 @@ export const PAGE = 60;
  
- export const PAGE = 60;
+ /** Jellyfin's sort for what was added last. */
+ export const NEWEST = 'DateCreated,SortName';
++
 +/** The pages of a catalog kept on the device, however far it was scrolled. */
 +const SAVED_PAGES = 2;
 +
@@ -47,9 +48,9 @@ index 043c7dfd..a0ca11b1 100644
  
  /** Every key starts here, so a user switch or sign-out drops them all. */
  export function useKey() {
-@@ -172,7 +187,7 @@ export function useItemPages(
-       opts.recursive,
-       pageSize,
+@@ -181,7 +197,7 @@ export function useItemPages(
+       opts.sortBy,
+       opts.descending,
      ],
 -    meta: { cache: 'home' },
 +    meta: { cache: 'home', saved: firstPages },
