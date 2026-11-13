@@ -142,17 +142,10 @@ enum BridgeScript {
   const LAYERS = false;
   try {
     const rules = [];
-    // A trailer's veil (upstream's `TrailerVeil`, features/trailers/preview.tsx) covers the hole the page
-    // cuts for the video and fades off it. Upstream makes it a layer ahead of time because one made as
-    // its fade starts draws nothing for a frame; reset to auto here, that frame showed the trailer's first
-    // picture bare, a flash in the hero. It alone keeps its will-change, and only while a trailer is
-    // mounted: the hero's backdrops and the rail share the class, and stay reset (a standing
-    // full-screen layer is about 33 MB at the TV's 2x).
-    const VEIL = '.bg-\\[--background\\].will-change-\\[opacity\\]';
     // With SLIDES on, the glide layers keep their own will-change, so they slide as before.
     if (!LAYERS)
       rules.push(
-        (SLIDES ? '*:not([data-glide-layer])' : '*') + ':not(' + VEIL + '),*::before,*::after{will-change:auto!important}',
+        (SLIDES ? '*:not([data-glide-layer])' : '*') + ',*::before,*::after{will-change:auto!important}',
         '.animate-pulse,.UI-Skeleton__root{animation:none!important}'
       );
     else if (!SLIDES) rules.push('[data-glide-layer]{will-change:auto!important}');

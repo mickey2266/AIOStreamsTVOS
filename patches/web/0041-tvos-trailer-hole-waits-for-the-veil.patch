@@ -1,0 +1,50 @@
+diff --git a/packages/web/src/features/trailers/preview.tsx b/packages/web/src/features/trailers/preview.tsx
+index 78721b9..edc03a3 100644
+--- a/packages/web/src/features/trailers/preview.tsx
++++ b/packages/web/src/features/trailers/preview.tsx
+@@ -6,6 +6,7 @@ import { cn } from '@aiostreams/ui/core/styling';
+ import { useSession } from '@/lib/jellyfin/session';
+ import { useItem } from '@/lib/jellyfin/queries';
+ import { currentHost } from '@/lib/hosts';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import { settings, useSetting, type TrailerSpot } from '@/lib/settings';
+ import { usePageShown } from '@/lib/page-shown';
+ import { usePlayback } from '@/lib/playback/session';
+@@ -233,6 +234,27 @@ export function TrailerVeil({ shown }: { shown: boolean }) {
+   );
+ }
+ 
++/**
++ * `shown` for the hole in the page's background: on the Apple TV, two frames late as it turns on, and
++ * at once as it turns off. Its WebKit can draw the veil's first frame of the fade late, and the hole cut
++ * in that same frame bared the trailer's picture sharply along its edges, where only the veil covers
++ * it. Cut once the veil has drawn, the page background still covers the box until then (AIOStreamsTVOS).
++ */
++function useHoleOpen(shown: boolean): boolean {
++  const [late, setLate] = React.useState(false);
++  React.useEffect(() => {
++    if (!shown || !appleTv()) {
++      setLate(false);
++      return;
++    }
++    let frame = requestAnimationFrame(() => {
++      frame = requestAnimationFrame(() => setLate(true));
++    });
++    return () => cancelAnimationFrame(frame);
++  }, [shown]);
++  return appleTv() ? shown && late : shown;
++}
++
+ /** Played out, failed or had nothing to play; or stopped as its spot moved or another began. */
+ export type TrailerEnd = 'over' | 'stopped';
+ 
+@@ -455,7 +477,8 @@ function PlayedPreview({
+     },
+     [host, setFrame]
+   );
+-  useVideoHole(host && shown && !full && !over ? hole : null, radius);
++  const holeOpen = useHoleOpen(shown);
++  useVideoHole(host && holeOpen && !full && !over ? hole : null, radius);
+   usePlayerPage(full);
+   React.useEffect(() => {
+     if (!full) return;
