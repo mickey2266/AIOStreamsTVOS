@@ -1,5 +1,5 @@
 diff --git a/packages/web/src/lib/artwork/drawn.ts b/packages/web/src/lib/artwork/drawn.ts
-index cf184d58..210f963b 100644
+index cf184d58d..210f963b7 100644
 --- a/packages/web/src/lib/artwork/drawn.ts
 +++ b/packages/web/src/lib/artwork/drawn.ts
 @@ -40,6 +40,11 @@ let drawnBytes = 0;
@@ -15,7 +15,7 @@ index cf184d58..210f963b 100644
    const src = newest.get(artworkKey(url));
    const entry = src ? drawn.get(src) : undefined;
 diff --git a/packages/web/src/lib/artwork/shrink.ts b/packages/web/src/lib/artwork/shrink.ts
-index 063654f2..7b27dd92 100644
+index e16a28a31..bfe727aff 100644
 --- a/packages/web/src/lib/artwork/shrink.ts
 +++ b/packages/web/src/lib/artwork/shrink.ts
 @@ -5,7 +5,14 @@
@@ -31,7 +31,7 @@ index 063654f2..7b27dd92 100644
 +  keepDrawn,
 +  type Drawn,
 +} from './drawn';
- import type { ShrinkJob, ShrinkReply } from './messages';
+ import type { ShrinkJob, ShrinkReply, WashJob } from './messages';
  import { imageAccept, noteRead, refused } from './reads';
  
 @@ -21,7 +28,13 @@ export const canShrink =
@@ -60,7 +60,7 @@ index 063654f2..7b27dd92 100644
  
  interface Pending extends Omit<
    ShrinkJob,
-@@ -176,6 +190,22 @@ function start(): Slot | null {
+@@ -193,6 +207,22 @@ function start(): Slot | null {
  // Started with the page, so the first artwork doesn't wait on the workers loading.
  if (canShrink) for (let i = 0; i < WORKERS; i++) start();
  
@@ -83,7 +83,7 @@ index 063654f2..7b27dd92 100644
  /** Starts another worker only while every one is busy. */
  function freeSlot(ahead: boolean): Slot | null {
    if (broken) return null;
-@@ -256,6 +286,7 @@ function dispatch() {
+@@ -273,6 +303,7 @@ function dispatch() {
      queue.shift();
      slot.busy++;
      running.set(job.id, { job, slot });

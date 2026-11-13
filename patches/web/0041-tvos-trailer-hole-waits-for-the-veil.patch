@@ -1,5 +1,5 @@
 diff --git a/packages/web/src/features/trailers/preview.tsx b/packages/web/src/features/trailers/preview.tsx
-index 78721b9..edc03a3 100644
+index e5bb79fd8..d985453bd 100644
 --- a/packages/web/src/features/trailers/preview.tsx
 +++ b/packages/web/src/features/trailers/preview.tsx
 @@ -6,6 +6,7 @@ import { cn } from '@aiostreams/ui/core/styling';
@@ -10,7 +10,7 @@ index 78721b9..edc03a3 100644
  import { settings, useSetting, type TrailerSpot } from '@/lib/settings';
  import { usePageShown } from '@/lib/page-shown';
  import { usePlayback } from '@/lib/playback/session';
-@@ -233,6 +234,27 @@ export function TrailerVeil({ shown }: { shown: boolean }) {
+@@ -268,6 +269,27 @@ export function TrailerVeil({ shown }: { shown: boolean }) {
    );
  }
  
@@ -38,13 +38,13 @@ index 78721b9..edc03a3 100644
  /** Played out, failed or had nothing to play; or stopped as its spot moved or another began. */
  export type TrailerEnd = 'over' | 'stopped';
  
-@@ -455,7 +477,8 @@ function PlayedPreview({
+@@ -497,7 +519,8 @@ function PlayedPreview({
      },
      [host, setFrame]
    );
--  useVideoHole(host && shown && !full && !over ? hole : null, radius);
+-  useVideoHole(host && shown && !full && !over ? hole : null, radius, soft);
 +  const holeOpen = useHoleOpen(shown);
-+  useVideoHole(host && holeOpen && !full && !over ? hole : null, radius);
++  useVideoHole(host && holeOpen && !full && !over ? hole : null, radius, soft);
    usePlayerPage(full);
    React.useEffect(() => {
      if (!full) return;
