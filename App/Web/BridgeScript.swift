@@ -165,12 +165,41 @@ enum BridgeScript {
      * set only while it plays. Stripped, the background covers the app's video: sound, black picture.
      */
     const HOLE = "[data-ui='page-background']";
+    /*
+     * With "Background from artwork" on, the hero's and a title's art fade out into the blurred wash
+     * behind the page with a mask (upstream's styles.css, `html[data-art-wash]`), and their shades
+     * go transparent. Stripped, the art ends sharply with nothing to shade the text over it, so those
+     * two keep their masks then. Each is about a screen's surface while shown; the setting is off by
+     * default.
+     */
+    const ART_FADES = "html[data-art-wash] [data-ui='hero-art'],html[data-art-wash] [data-ui='item-backdrop']";
+    /*
+     * Upstream draws the hero's and a title backdrop's shades as the page's colour under a mask
+     * (1332031a3, "replace opacity modifiers on CSS variable colours"). Stripped, each is a solid
+     * slab of the page's colour over the art. With masks off, they're drawn as the gradients those
+     * masks make instead, which need no surface of their own. The hero trailer's fades have no
+     * name of their own, so they're found by their mask's class.
+     */
+    const mix = (p) => 'color-mix(in srgb,var(--background) ' + p + '%,transparent)';
+    const shade = (dir, mid) =>
+      '{background:linear-gradient(to ' + dir + ',var(--background),' + mid + ',transparent)!important}';
+    const SIDE = "[data-ui='hero-shade'][data-name='side']";
+    const TRAILER_SIDE = "[class*='[mask-image:linear-gradient(to_right,black,rgb(0_0_0/0.6)_30%']";
     if (!EFFECTS)
       rules.push(
         'html:not([data-blur-spoilers]) *,html[data-blur-spoilers] *:not(' + SPOILERS + '),' +
           '*::before,*::after{filter:none!important}',
         '*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}',
-        '*:not(' + HOLE + '),*::before,*::after{-webkit-mask-image:none!important;mask-image:none!important}'
+        '*:not(' + HOLE + '):not(' + ART_FADES + '),*::before,*::after{-webkit-mask-image:none!important;mask-image:none!important}',
+        "[data-ui='item-backdrop-shade'][data-name='bottom']" + shade('top', mix(70)),
+        SIDE + shade('right', mix(70) + ' 35%'),
+        "html[dir='rtl'] " + SIDE + shade('left', mix(70) + ' 35%'),
+        "[data-ui='hero-shade'][data-name='bottom']" + shade('top', mix(60)),
+        TRAILER_SIDE + shade('right', mix(60) + ' 30%'),
+        "html[dir='rtl'] " + TRAILER_SIDE + shade('left', mix(60) + ' 30%'),
+        "[class*='[mask-image:linear-gradient(to_top,black,rgb(0_0_0/0.6)_30%']" + shade('top', mix(60) + ' 30%'),
+        "[class*='[mask-image:linear-gradient(to_bottom,rgb(0_0_0/0.7),transparent)]']" +
+          '{background:linear-gradient(to bottom,' + mix(70) + ',transparent)!important}'
       );
     if (rules.length) {
       const style = document.createElement('style');
