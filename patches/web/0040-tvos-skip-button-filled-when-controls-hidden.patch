@@ -1,0 +1,27 @@
+diff --git a/packages/web/src/features/player/controls.tsx b/packages/web/src/features/player/controls.tsx
+index 650a8ed..c065e8a 100644
+--- a/packages/web/src/features/player/controls.tsx
++++ b/packages/web/src/features/player/controls.tsx
+@@ -18,7 +18,7 @@ import { LoadingSpinner } from '@aiostreams/ui/loading-spinner';
+ import { cn } from '@aiostreams/ui/core/styling';
+ import { clock, clockTime, itemSubtitle, itemTitle } from '@/lib/format';
+ import { currentHost } from '@/lib/hosts';
+-import { appBridge } from '@/lib/hosts/shell/bridge';
++import { appBridge, appleTv } from '@/lib/hosts/shell/bridge';
+ import type { PlayerController } from '@/lib/playback/controller';
+ import { settings, useSetting } from '@/lib/settings';
+ import { delayNotice, syncNotice } from '@/lib/subtitles/delay';
+@@ -910,7 +910,12 @@ function SkipSegment({
+     >
+       <PlayerAction
+         primary
+-        className="shadow-lg"
++        className={cn(
++          'shadow-lg',
++          // With the controls hidden nothing is focused, but Select still presses the button, so it
++          // is drawn filled as focus would (AIOStreamsTVOS).
++          !visible && appleTv() && 'border-white bg-white text-black'
++        )}
+         rightIcon={<LuSkipForward />}
+         onClick={onSkip}
+       >
