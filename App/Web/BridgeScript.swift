@@ -127,10 +127,11 @@ enum BridgeScript {
    * backdrop under two nested `mask-image`s, or, without one, a poster under
    * `blur-3xl` across most of the screen. WebKit draws masks and filters into
    * surfaces of their own at the screen's 2x scale. With EFFECTS off, edges
-   * that fade end sharply and blurred washes are plain. Set it back to true
-   * to draw them again.
+   * that fade end sharply and blurred washes are plain. On, so every theme
+   * option and fade looks as upstream draws it; set it to false again if the
+   * memory kills come back.
    */
-  const EFFECTS = false;
+  const EFFECTS = true;
   /*
    * Standing layers and pulsing placeholders. The rotating hero keeps several
    * full-screen backdrops as standing layers (`will-change`), and rows that
@@ -185,11 +186,25 @@ enum BridgeScript {
       '{background:linear-gradient(to ' + dir + ',var(--background),' + mid + ',transparent)!important}';
     const SIDE = "[data-ui='hero-shade'][data-name='side']";
     const TRAILER_SIDE = "[class*='[mask-image:linear-gradient(to_right,black,rgb(0_0_0/0.6)_30%']";
+    /*
+     * Frosted and liquid glass (Theme > Glass surface: the navigation, and with Glass panels on, the
+     * menus, dialogs and settings cards over the artwork background) are a thin fill over a
+     * `backdrop-filter` blur. Stripped, they're nearly see-through, so they keep their blur, drawn as
+     * upstream intends. Each blurred surface is a layer of its own while shown; Glass surface set to
+     * Solid draws none.
+     */
+    const GLASS_PANELS =
+      ".UI-Popover__root,.UI-DropdownMenu__root,.UI-DropdownMenu__subContent,.UI-ContextMenu__root," +
+      ".UI-Select__content,.UI-Tooltip__root,.UI-Modal__content,.UI-Drawer__content," +
+      "[data-ui='settings-card-body'],[data-ui='settings-tab-group'],[data-ui='pill-tabs']";
+    const GLASS =
+      ".glass-surface:not([data-surface='solid']),html[data-art-wash][data-art-glass]:not(.playing) :is(" +
+      GLASS_PANELS + ')';
     if (!EFFECTS)
       rules.push(
         'html:not([data-blur-spoilers]) *,html[data-blur-spoilers] *:not(' + SPOILERS + '),' +
           '*::before,*::after{filter:none!important}',
-        '*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}',
+        '*:not(' + GLASS + '),*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}',
         '*:not(' + HOLE + '):not(' + ART_FADES + '),*::before,*::after{-webkit-mask-image:none!important;mask-image:none!important}',
         "[data-ui='item-backdrop-shade'][data-name='bottom']" + shade('top', mix(70)),
         SIDE + shade('right', mix(70) + ' 35%'),
