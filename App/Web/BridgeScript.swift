@@ -328,6 +328,46 @@ enum BridgeScript {
   } catch {}
 
   /*
+   * Every picture at the width the page asked for it. Each artwork address names the width it's
+   * drawn at in device pixels (`maxWidth`), but the server resizes only hosts it knows, and the
+   * page's artwork workers, which would draw the rest down, don't start for the app's scheme on
+   * this WebKit: a card got a 1654x2339 poster, 15 MB decoded, and the page's pictures reached
+   * 200 MB. Such an image loads from the app's `/fit/<width>?u=<address>` instead (ImageFit.swift),
+   * which passes one already no wider as it is and decodes a wider one at the smaller size, so the
+   * page never holds the original. Set on any `<img>`, however the page sets its address.
+   */
+  const FIT_IMAGES = true;
+  try {
+    // Only as the app's own page (WebApp.scheme), whose scheme handler answers `/fit/`.
+    if (FIT_IMAGES && location.protocol === 'aiostv:') {
+      const fitPrefix = location.protocol + '//' + location.host + '/fit/';
+      const fitted = (value) => {
+        if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) return value;
+        try {
+          const address = new URL(value);
+          const width = parseInt(address.searchParams.get('maxWidth') || address.searchParams.get('fillWidth') || '', 10);
+          return width > 0 ? fitPrefix + width + '?u=' + encodeURIComponent(value) : value;
+        } catch {
+          return value;
+        }
+      };
+      const src = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+      if (src?.set)
+        Object.defineProperty(HTMLImageElement.prototype, 'src', {
+          ...src,
+          set(value) {
+            src.set.call(this, fitted(value));
+          },
+        });
+      const setAttribute = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function (name, value) {
+        if (this instanceof HTMLImageElement && String(name).toLowerCase() === 'src') value = fitted(value);
+        return setAttribute.call(this, name, value);
+      };
+    }
+  } catch {}
+
+  /*
    * The page keeps every card it has shown mounted, and WebKit keeps each
    * mounted <img>'s decoded picture, so a long scroll through a catalog
    * fills WebKit's process until tvOS ends it ("ran out of memory"). A

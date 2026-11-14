@@ -179,10 +179,10 @@ enum MemoryLog {
         } else {
             text += ", no artwork workers"
         }
-        // Backdrops the app drew down to the screen's width (patches/web/0042, ImageFit), and why any weren't.
+        // Pictures the app fitted to the width the page asked for (ImageFit), since launch, and why any weren't.
         let fits = ImageFit.current
         if fits.drawn + fits.passed + fits.failed > 0 {
-            text += ", backdrops \(fits.drawn) drawn down, \(fits.passed) as sent, \(fits.failed) failed"
+            text += ", pictures through the app \(fits.drawn) drawn down, \(fits.passed) as sent, \(fits.failed) failed"
             if !fits.lastError.isEmpty { text += " (last: \(fits.lastError))" }
         }
         lastStats = text
