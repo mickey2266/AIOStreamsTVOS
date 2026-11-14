@@ -66,7 +66,7 @@ enum ImageFit {
         }
         let key = "\(width) \(source.absoluteString)"
         if let hit = cached(key) { return done(hit.data, hit.type) }
-        session.dataTask(with: source) { data, response, error in
+        load(source, retried: false) { data, response, error in
             if let error {
                 note(failed: error.localizedDescription)
                 return done(nil, nil)
@@ -85,6 +85,26 @@ enum ImageFit {
                 note(drawn: made.drawn)
                 done(made.data, made.type)
             }
+        }
+    }
+
+    /**
+     * The download, tried once more a moment later where it couldn't connect or timed out: a
+     * scroll asks for dozens at once, and a host can refuse some of a burst. The page loads one that
+     * fails twice from its own address (BridgeScript's FIT_IMAGES).
+     */
+    private static func load(_ source: URL, retried: Bool,
+                             done: @escaping (Data?, URLResponse?, Error?) -> Void) {
+        session.dataTask(with: source) { data, response, error in
+            let transient: Set<Int> = [
+                NSURLErrorCannotConnectToHost, NSURLErrorTimedOut, NSURLErrorNetworkConnectionLost,
+                NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed,
+            ]
+            if let error = error as NSError?, error.domain == NSURLErrorDomain, transient.contains(error.code), !retried {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) { load(source, retried: true, done: done) }
+                return
+            }
+            done(data, response, error)
         }.resume()
     }
 

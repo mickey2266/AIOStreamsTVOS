@@ -368,6 +368,25 @@ enum BridgeScript {
         if (this instanceof HTMLImageElement && String(name).toLowerCase() === 'src') value = fitted(value);
         return setAttribute.call(this, name, value);
       };
+      /*
+       * A picture the app couldn't fetch (one in six once, "Could not connect to the server") is
+       * loaded from its own address instead, as the page would have, rather than left missing.
+       * Set past the rewrite above, so it isn't sent to the app again.
+       */
+      document.addEventListener(
+        'error',
+        (e) => {
+          const img = e.target;
+          if (!(img instanceof HTMLImageElement)) return;
+          const at = img.getAttribute('src') || '';
+          if (!at.startsWith(fitPrefix)) return;
+          try {
+            const original = new URL(at).searchParams.get('u');
+            if (original) setAttribute.call(img, 'src', original);
+          } catch {}
+        },
+        true
+      );
     }
   } catch {}
 
@@ -1153,6 +1172,19 @@ enum BridgeScript {
       artKept: art.kept || 0,
       artKeptMB: art.keptMB || 0,
       largestFrom,
+      // The kinds of element there are most of, for a page that grows as it's browsed.
+      mostUi: (() => {
+        try {
+          const tally = new Map();
+          for (const el of document.querySelectorAll('[data-ui]')) {
+            const name = el.getAttribute('data-ui');
+            tally.set(name, (tally.get(name) || 0) + 1);
+          }
+          return [...tally].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([n, c]) => `${n} ${c}`).join(', ');
+        } catch {
+          return '';
+        }
+      })(),
       // What was on screen that the reloads with "Background from artwork" on point at.
       artWash: document.documentElement.hasAttribute('data-art-wash'),
       cardPreview: !!document.querySelector('[data-ui="open-card"]:not(.invisible)'),

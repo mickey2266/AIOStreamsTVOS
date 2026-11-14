@@ -167,6 +167,8 @@ enum MemoryLog {
         if int("canvases") > 0 { text += ", canvases \(int("canvasMB")) MB in \(int("canvases"))" }
         if int("videos") > 0 { text += ", \(int("videos")) videos" }
         text += ", \(int("cards")) cards, \(int("elements")) elements"
+        if let most = message.text("mostUi"), !most.isEmpty { text += " (most \(most))" }
+        if let path = message.text("path"), !path.isEmpty { text += " on \(path)" }
         if int("episodes") > 0 { text += ", \(int("episodes")) episodes" }
         if int("layers") > 0 { text += ", \(int("layers")) glide layers" }
         if message.flag("artWash") == true { text += ", artwork background shown" }
