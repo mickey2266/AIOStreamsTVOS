@@ -1,0 +1,119 @@
+diff --git a/packages/web/src/app/item/_components/backdrop.tsx b/packages/web/src/app/item/_components/backdrop.tsx
+index 7e10d61f0..80a1ae583 100644
+--- a/packages/web/src/app/item/_components/backdrop.tsx
++++ b/packages/web/src/app/item/_components/backdrop.tsx
+@@ -1,7 +1,7 @@
+ import React from 'react';
+ import { cn } from '@aiostreams/ui/core/styling';
+ import { BackdropFrame } from '@/components/media/hero';
+-import { CachedImage } from '@/components/cached-image';
++import { CachedImage, SHOWN_FIT_PX } from '@/components/cached-image';
+ import { DrawnWash } from '@/components/drawn-wash';
+ import { currentHost } from '@/lib/hosts';
+ 
+@@ -73,7 +73,7 @@ export function Backdrop({
+       data-ui="item-backdrop-image"
+       data-wash={wash || undefined}
+       src={src}
+-      fit
++      fit={SHOWN_FIT_PX}
+       alt=""
+       // Decoded first, as a large image would otherwise appear a moment after it's shown.
+       onLoad={(e) =>
+diff --git a/packages/web/src/components/cached-image.tsx b/packages/web/src/components/cached-image.tsx
+index 0f0c9b333..ecb106129 100644
+--- a/packages/web/src/components/cached-image.tsx
++++ b/packages/web/src/components/cached-image.tsx
+@@ -9,6 +9,13 @@ import { appleTv } from '@/lib/hosts/shell/bridge';
+  */
+ const FIT_PX = 1920;
+ 
++/**
++ * The 4K screen's full width, for the backdrop in view: the hero's title and
++ * a title page's own. WebKit draws the page at twice its 1280 points, so a
++ * 1920 one was stretched; others stay at FIT_PX (AIOStreamsTVOS).
++ */
++export const SHOWN_FIT_PX = 3840;
++
+ /**
+  * `src` no wider than the screen, made by the Apple TV app (its ImageFit, at
+  * `/fit/<width>?u=<address>` on the page's own scheme). Some servers send a
+@@ -16,12 +23,17 @@ const FIT_PX = 1920;
+  * holds each decoded at that size; the app decodes it at the smaller size
+  * itself, so neither process holds the whole picture (AIOStreamsTVOS).
+  */
+-function fitted(src: string | undefined): string | undefined {
++function fitted(src: string | undefined, width = FIT_PX): string | undefined {
+   if (!src) return src;
+   try {
+     const address = new URL(src, location.href);
+-    if (address.protocol !== 'https:' && address.protocol !== 'http:') return src;
+-    const fit = new URL(`/fit/${FIT_PX}`, location.href);
++    if (address.protocol !== 'https:' && address.protocol !== 'http:')
++      return src;
++    // Asked of the server at the width it's shown at, for one that resizes.
++    const asked = Number(address.searchParams.get('maxWidth'));
++    if (asked && asked < width)
++      address.searchParams.set('maxWidth', String(width));
++    const fit = new URL(`/fit/${width}`, location.href);
+     fit.searchParams.set('u', address.href);
+     return fit.href;
+   } catch {
+@@ -38,13 +50,21 @@ export function CachedImage({
+   fit = false,
+   ...props
+ }: React.ComponentProps<'img'> & {
+-  /** On an Apple TV, drawn down to the screen's width first when wider, as a backdrop may be. */
+-  fit?: boolean;
++  /**
++   * On an Apple TV, drawn down to the screen's width first when wider, as a
++   * backdrop may be; or to this many pixels wide, for the one backdrop shown
++   * (AIOStreamsTVOS).
++   */
++  fit?: boolean | number;
+ }) {
+   // A lazy image waits until it nears the screen, as the browser would.
+   const [view, near] = useNear<HTMLImageElement>('300px', loading !== 'lazy');
+   const saved = useSavedSrc(src, near);
+-  const shown = near ? (fit && appleTv() ? fitted(saved) : saved) : undefined;
++  const shown = near
++    ? fit && appleTv()
++      ? fitted(saved, typeof fit === 'number' ? fit : FIT_PX)
++      : saved
++    : undefined;
+   const refs = React.useCallback(
+     (el: HTMLImageElement | null) => {
+       view.current = el;
+diff --git a/packages/web/src/components/media/hero.tsx b/packages/web/src/components/media/hero.tsx
+index 7266365e5..1677cd809 100644
+--- a/packages/web/src/components/media/hero.tsx
++++ b/packages/web/src/components/media/hero.tsx
+@@ -26,7 +26,7 @@ import type { BaseItemDto } from '@/lib/jellyfin/types';
+ import { pageRtl } from '@/lib/direction';
+ import { useHold } from '@/hooks/use-hold';
+ import { useLatest } from '@/hooks/use-latest';
+-import { CachedImage } from '@/components/cached-image';
++import { CachedImage, SHOWN_FIT_PX } from '@/components/cached-image';
+ import {
+   releaseArtSelection,
+   useArtBackground,
+@@ -185,7 +185,8 @@ function Backdrops({
+         <CachedImage
+           key={`loading ${loading}`}
+           src={loading}
+-          fit
++          // At the shown backdrop's width, so its layer then finds it decoded.
++          fit={SHOWN_FIT_PX}
+           alt=""
+           // Decoded before its layer fades in, which would otherwise start with nothing drawn.
+           onLoad={(e) =>
+@@ -202,7 +203,8 @@ function Backdrops({
+           key={layer.id}
+           data-ui="hero-backdrop"
+           src={layer.src}
+-          fit
++          // The title shown; one fading out under it goes once the next is whole.
++          fit={SHOWN_FIT_PX}
+           alt=""
+           onAnimationEnd={(e) => {
+             if (e.target !== e.currentTarget) return;
