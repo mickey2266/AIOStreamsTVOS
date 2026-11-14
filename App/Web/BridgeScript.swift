@@ -1153,6 +1153,37 @@ enum BridgeScript {
         largestFrom = `${named} from ${at}`;
       }
     } catch {}
+    /*
+     * Roughly what the page's own drawing layers take: each element drawn into a
+     * buffer of its own (glide layers, will-change, blurs, videos), by its box
+     * near the screen at WebKit's drawing scale, as WebKit draws a large layer
+     * only near what shows. Not in the picture counts above; an estimate, as
+     * WebKit may share or skip a layer that paints nothing of its own.
+     */
+    let layerBytes = 0;
+    let layerCount = 0;
+    let blurCount = 0;
+    try {
+      const scale = drawScale || 1;
+      const nearW = innerWidth;
+      const nearH = innerHeight;
+      const layered = document.querySelectorAll(
+        '[data-glide-layer],.will-change-transform,[class*="will-change"],[class*="backdrop-blur"],[class*="blur-"],video,canvas'
+      );
+      for (const el of layered) {
+        if (el.closest('[inert]') && !el.closest('[data-page="home"]')) continue;
+        const r = el.getBoundingClientRect();
+        const w = Math.max(0, Math.min(r.right, innerWidth + nearW) - Math.max(r.left, -nearW));
+        const h = Math.max(0, Math.min(r.bottom, innerHeight + nearH) - Math.max(r.top, -nearH));
+        if (!w || !h) continue;
+        layerCount++;
+        // An SVG's className isn't a string.
+        const blurred = /blur/.test(typeof el.className === 'string' ? el.className : '');
+        if (blurred) blurCount++;
+        // A blur draws what's behind it again, into a buffer of its own.
+        layerBytes += w * h * scale * scale * 4 * (blurred ? 2 : 1);
+      }
+    } catch {}
     let canvasBytes = 0;
     const canvases = document.getElementsByTagName('canvas');
     for (const c of canvases) canvasBytes += c.width * c.height * 4;
@@ -1171,6 +1202,9 @@ enum BridgeScript {
       type: 'tvos-page-stats',
       drawScale,
       viewport: `${innerWidth}x${innerHeight}`,
+      layerMB: Math.round(layerBytes / 1048576),
+      layerCount,
+      blurCount,
       artWorkers: art.workers || 0,
       artQueued: art.queued || 0,
       artRunning: art.running || 0,

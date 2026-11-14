@@ -192,6 +192,9 @@ enum MemoryLog {
         if let path = message.text("path"), !path.isEmpty { text += " on \(path)" }
         if int("episodes") > 0 { text += ", \(int("episodes")) episodes" }
         if int("layers") > 0 { text += ", \(int("layers")) glide layers" }
+        if int("layerCount") > 0 {
+            text += ", drawing layers about \(int("layerMB")) MB in \(int("layerCount")) near the screen (\(int("blurCount")) blurred)"
+        }
         if message.flag("artWash") == true { text += ", artwork background shown" }
         if message.flag("cardPreview") == true { text += ", a card preview open" }
         // The artwork workers decode inside the page's process, outside the picture counts above.
