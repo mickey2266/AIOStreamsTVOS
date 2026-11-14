@@ -3,7 +3,7 @@ new file mode 100644
 index 00000000..eddd365e
 --- /dev/null
 +++ b/packages/web/src/app/test-video/page.tsx
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,164 @@
 +import { t } from '@lingui/core/macro';
 +import { Trans } from '@lingui/react/macro';
 +import React from 'react';
@@ -93,7 +93,7 @@ index 00000000..eddd365e
 +    () => ({ Id: `${TEST_ID}:${url}`, MediaStreams: [] }),
 +    [url]
 +  );
-+  const player = usePlayer(hostPlayer ?? videoEngine(video), {
++  const player = usePlayer([hostPlayer ?? videoEngine(video)], {
 +    client,
 +    item,
 +    url,
@@ -131,7 +131,6 @@ index 00000000..eddd365e
 +        <PlayerControls
 +          item={item}
 +          player={player}
-+          segments={null}
 +          onBack={onBack}
 +        />
 +      )}

@@ -570,6 +570,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
             NSLog("[page] %@", message.text("message") ?? "")
         case "tvos-page-stats":
             MemoryLog.pageStats(message)
+        case "tvos-page-moved":
+            MemoryLog.pageMoved(from: message.text("from") ?? "?", to: message.text("to") ?? "?")
         default:
             // Downloads, keyboard completions and the like have no Apple TV part.
             break

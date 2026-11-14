@@ -150,7 +150,17 @@ enum MemoryLog {
 
     /// The page's own count of what it holds, from its last `tvos-page-stats`, and the largest picture total seen.
     private static var lastStats: String?
+    private static var lastStatsAt: Date?
     private static var peakPictureMB: Int?
+
+    /// The page's last few moves from page to page, newest last, so an end can be put next to one.
+    private static var moves: [(at: Date, from: String, to: String)] = []
+
+    /// A `tvos-page-moved` message: the page went from one path to another, such as Back to `/`.
+    static func pageMoved(from: String, to: String) {
+        moves.append((Date(), from, to))
+        if moves.count > 4 { moves.removeFirst(moves.count - 4) }
+    }
 
     /// A `tvos-page-stats` message: the pictures, canvases and elements the page holds, every 5 s.
     static func pageStats(_ message: Message) {
@@ -188,6 +198,7 @@ enum MemoryLog {
             if !fits.lastError.isEmpty { text += " (last: \(fits.lastError))" }
         }
         lastStats = text
+        lastStatsAt = Date()
     }
 
     /// WebKit's word that the page's process stopped answering it, or answers again.
@@ -217,10 +228,21 @@ enum MemoryLog {
         var sizes = lastWebMB.map { "page \($0) MB" } ?? ""
         if let gpu = lastGpuMB { sizes += (sizes.isEmpty ? "" : ", ") + "WebKit graphics \(gpu) MB" }
         if !sizes.isEmpty { before += "; \(sizes) at most 5 s before" }
-        if let stats = lastStats { before += "; the page held \(stats) at most 5 s before" }
+        if let stats = lastStats {
+            let ago = lastStatsAt.map { "\(seconds($0)) before" } ?? "at most 5 s before"
+            before += "; the page held \(stats) \(ago)"
+        }
+        // Whether it ended as it moved between pages, such as Back to Home, and the moves before that.
+        if let last = moves.last {
+            before += "; \(seconds(last.at)) after going from \(last.from) to \(last.to)"
+            let earlier = moves.dropLast().reversed().map { "\($0.from) to \($0.to) \(seconds($0.at)) before" }
+            if !earlier.isEmpty { before += " (earlier: \(earlier.joined(separator: ", ")))" }
+        }
         lastWebMB = nil
         lastGpuMB = nil
         lastStats = nil
+        lastStatsAt = nil
+        moves = []
         let page = path.map { " on \($0)" } ?? ""
         note("page's web process ended (\(cause(reason)))\(page) \(playing ? "with a video loaded" : "while browsing")\(before)")
     }

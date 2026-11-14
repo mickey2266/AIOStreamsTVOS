@@ -1212,6 +1212,33 @@ enum BridgeScript {
     }, STATS_EVERY);
   } catch {}
 
+  /*
+   * Each move between pages, such as Back from a title to Home, told to the app
+   * as it happens, and the page's counts a second later, once the new page is
+   * drawn. An end of the page's process can then be put next to the move that
+   * came just before it. The move itself is only two paths, so it adds nothing
+   * to the work of the moment it reports.
+   */
+  const MOVE_CHECK_EVERY = 250;
+  const MOVE_STATS_AFTER = 1000;
+  const routeOf = (hash) => hash.slice(1).split('?')[0] || '/';
+  try {
+    let lastRoute = routeOf(location.hash);
+    setInterval(() => {
+      try {
+        const route = routeOf(location.hash);
+        if (route === lastRoute) return;
+        send({ type: 'tvos-page-moved', from: lastRoute, to: route });
+        lastRoute = route;
+        setTimeout(() => {
+          try {
+            send(pageStats());
+          } catch {}
+        }, MOVE_STATS_AFTER);
+      } catch {}
+    }, MOVE_CHECK_EVERY);
+  } catch {}
+
   send({ type: 'hello' });
 })();
 """#
