@@ -176,12 +176,14 @@ enum MemoryLog {
             text += ", artwork workers \(int("artWorkers")): \(int("artRunning")) running"
             text += " (\(int("artSlow")) slow, most \(int("artPeak"))), \(int("artQueued")) queued"
             text += ", \(int("artKeptMB")) MB kept in \(int("artKept"))"
+        } else {
+            text += ", no artwork workers"
         }
-        // Backdrops drawn down to the screen's width (patches/web/0042), and why any weren't.
-        let fits = int("fitDrawn") + int("fitPassed") + int("fitFailed")
-        if fits > 0 {
-            text += ", backdrops \(int("fitDrawn")) drawn down, \(int("fitPassed")) as sent, \(int("fitFailed")) failed"
-            if let error = message.text("fitError"), !error.isEmpty { text += " (last: \(error))" }
+        // Backdrops the app drew down to the screen's width (patches/web/0042, ImageFit), and why any weren't.
+        let fits = ImageFit.current
+        if fits.drawn + fits.passed + fits.failed > 0 {
+            text += ", backdrops \(fits.drawn) drawn down, \(fits.passed) as sent, \(fits.failed) failed"
+            if !fits.lastError.isEmpty { text += " (last: \(fits.lastError))" }
         }
         lastStats = text
     }

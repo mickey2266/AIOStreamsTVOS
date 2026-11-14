@@ -47,6 +47,13 @@ typedef NS_ENUM(NSInteger, AIOPageEnd) {
 @property (nonatomic, copy, nullable) void (^onServed)(NSString *path, NSInteger status, NSUInteger bytes);
 /** The JPEG the app serves at a `/thumbnail/` path, or nil; called on the main thread. */
 @property (nonatomic, copy, nullable) NSData *_Nullable (^thumbnailAtPath)(NSString *path);
+/**
+ * The picture at `source` drawn down to `width`, for a `/fit/<width>?u=<address>`
+ * path: `done` with its bytes and type, or nils. Called on the main thread;
+ * `done` may be called on any.
+ */
+@property (nonatomic, copy, nullable) void (^fitImage)(NSURL *source, NSInteger width,
+                                                       void (^done)(NSData *_Nullable data, NSString *_Nullable type));
 /** In place of WebKit's own user agent. */
 @property (nonatomic, copy, nullable) NSString *userAgent;
 

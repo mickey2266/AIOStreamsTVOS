@@ -185,6 +185,32 @@ static NSString *AIOMimeType(NSString *extension) {
         return;
     }
     if (!self.liveTasks) self.liveTasks = [NSHashTable weakObjectsHashTable];
+    if ([path hasPrefix:@"/fit/"]) {
+        // A picture the page asked the app to draw down (patches/web/0042, ImageFit.swift).
+        AIOWebView *owner = self.owner;
+        NSInteger width = path.lastPathComponent.integerValue;
+        NSString *address = nil;
+        for (NSURLQueryItem *item in [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO].queryItems) {
+            if ([item.name isEqualToString:@"u"]) address = item.value;
+        }
+        NSURL *source = address ? [NSURL URLWithString:address] : nil;
+        if (!owner.fitImage || !source || width <= 0) {
+            [self answer:task url:url path:path data:nil type:nil];
+            return;
+        }
+        [self.liveTasks addObject:task];
+        __weak AIOWebKitDelegate *weakSelf = self;
+        owner.fitImage(source, width, ^(NSData *data, NSString *type) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                AIOWebKitDelegate *strongSelf = weakSelf;
+                // WebKit throws if a task it stopped is answered.
+                if (!strongSelf || ![strongSelf.liveTasks containsObject:task]) return;
+                [strongSelf.liveTasks removeObject:task];
+                [strongSelf answer:task url:url path:path data:data type:type];
+            });
+        });
+        return;
+    }
     if (!self.fileQueue) {
         self.fileQueue = dispatch_queue_create("io.github.aiostreams.web-files", DISPATCH_QUEUE_CONCURRENT);
     }
@@ -219,13 +245,21 @@ static NSString *AIOMimeType(NSString *extension) {
 
 /** Main thread. A file under `/static/` has its content hash in its name, so it never changes. */
 - (void)answer:(id)task url:(NSURL *)url path:(NSString *)path data:(nullable NSData *)data {
+    [self answer:task url:url path:path data:data type:nil];
+}
+
+/** As above, with the type given rather than taken from the path's extension. */
+- (void)answer:(id)task url:(NSURL *)url path:(NSString *)path data:(nullable NSData *)data type:(nullable NSString *)type {
     NSInteger status = data ? 200 : 404;
     data = data ?: [NSData data];
     BOOL hashed = status == 200 && [path hasPrefix:@"/static/"];
+    // A fitted picture's address names its source, which doesn't change under it.
+    BOOL fitted = status == 200 && [path hasPrefix:@"/fit/"];
     NSDictionary *headers = @{
-        @"Content-Type": data.length ? AIOMimeType(path.pathExtension) : @"text/plain",
+        @"Content-Type": data.length ? (type ?: AIOMimeType(path.pathExtension)) : @"text/plain",
         @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)data.length],
-        @"Cache-Control": hashed ? @"public, max-age=31536000, immutable" : @"no-cache",
+        @"Cache-Control": hashed ? @"public, max-age=31536000, immutable"
+                                 : fitted ? @"public, max-age=86400" : @"no-cache",
     };
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:url
                                                               statusCode:status

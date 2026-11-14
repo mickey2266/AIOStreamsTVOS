@@ -11,14 +11,13 @@ index b110e3940..7e10d61f0 100644
        // Decoded first, as a large image would otherwise appear a moment after it's shown.
        onLoad={(e) =>
 diff --git a/packages/web/src/components/cached-image.tsx b/packages/web/src/components/cached-image.tsx
-index 3f53049f0..a23d25981 100644
+index 3f53049f0..0f0c9b333 100644
 --- a/packages/web/src/components/cached-image.tsx
 +++ b/packages/web/src/components/cached-image.tsx
-@@ -1,6 +1,37 @@
+@@ -1,6 +1,33 @@
  import React from 'react';
  import { useSavedSrc } from '@/lib/cache/images';
  import { useNear } from '@/hooks/use-in-view';
-+import { canShrink, holdFitted } from '@/lib/artwork/shrink';
 +import { appleTv } from '@/lib/hosts/shell/bridge';
 +
 +/**
@@ -28,31 +27,28 @@ index 3f53049f0..a23d25981 100644
 +const FIT_PX = 1920;
 +
 +/**
-+ * `src` no wider than the screen: some hosts ignore the size asked for and
-+ * send backdrops 3840 wide, 33 MB each once decoded, and the Apple TV's page
-+ * process is ended for memory with a few held. Undefined while it's made.
++ * `src` no wider than the screen, made by the Apple TV app (its ImageFit, at
++ * `/fit/<width>?u=<address>` on the page's own scheme). Some servers send a
++ * backdrop's original, 3000 or more wide, whatever width is asked, and WebKit
++ * holds each decoded at that size; the app decodes it at the smaller size
++ * itself, so neither process holds the whole picture (AIOStreamsTVOS).
 + */
-+function useFitted(src: string | undefined, on: boolean): string | undefined {
-+  const [made, setMade] = React.useState<{ for: string; src: string }>();
-+  React.useEffect(() => {
-+    if (!on || !src) return;
-+    let live = true;
-+    const held = holdFitted(src, FIT_PX);
-+    void held.done.then((fitted) => {
-+      if (live) setMade({ for: src, src: fitted ?? src });
-+    });
-+    return () => {
-+      live = false;
-+      held.release();
-+    };
-+  }, [src, on]);
-+  if (!on || !src) return src;
-+  return made?.for === src ? made.src : undefined;
++function fitted(src: string | undefined): string | undefined {
++  if (!src) return src;
++  try {
++    const address = new URL(src, location.href);
++    if (address.protocol !== 'https:' && address.protocol !== 'http:') return src;
++    const fit = new URL(`/fit/${FIT_PX}`, location.href);
++    fit.searchParams.set('u', address.href);
++    return fit.href;
++  } catch {
++    return src;
++  }
 +}
  
  /** An `<img>` that shows the device's saved copy, and saves what it loads. */
  export function CachedImage({
-@@ -8,12 +39,20 @@ export function CachedImage({
+@@ -8,12 +35,16 @@ export function CachedImage({
    loading,
    style,
    ref,
@@ -67,11 +63,7 @@ index 3f53049f0..a23d25981 100644
    const [view, near] = useNear<HTMLImageElement>('300px', loading !== 'lazy');
    const saved = useSavedSrc(src, near);
 -  const shown = near ? saved : undefined;
-+  const fitted = useFitted(
-+    near ? saved : undefined,
-+    fit && canShrink && appleTv()
-+  );
-+  const shown = near ? fitted : undefined;
++  const shown = near ? (fit && appleTv() ? fitted(saved) : saved) : undefined;
    const refs = React.useCallback(
      (el: HTMLImageElement | null) => {
        view.current = el;
@@ -150,304 +142,3 @@ index 470268111..5c5c54c65 100644
      return () => clearTimeout(timer);
    }, [
      index,
-diff --git a/packages/web/src/lib/artwork/messages.ts b/packages/web/src/lib/artwork/messages.ts
-index f3e77a517..114355011 100644
---- a/packages/web/src/lib/artwork/messages.ts
-+++ b/packages/web/src/lib/artwork/messages.ts
-@@ -23,6 +23,15 @@ export interface WashJob {
-   accept: string;
- }
- 
-+/** An image no wider than `maxWidth` device pixels: as it is, or drawn down to it (AIOStreamsTVOS). */
-+export interface FitJob {
-+  id: number;
-+  fit: true;
-+  url: string;
-+  maxWidth: number;
-+  accept: string;
-+}
-+
- export interface ShrinkReply {
-   id: number;
-   /** The image as it is, at a blob address the worker made. */
-@@ -38,6 +47,8 @@ export interface ShrinkReply {
-   /** Sent on its own once a shrunk image has a small encoded copy. */
-   encoded?: { url: string; bytes: number } & Drawn;
-   error?: string;
-+  /** A fit drew the image down, rather than passing it on as it was. */
-+  drawnDown?: true;
-   /** The fetch itself failed, as it does when the host refuses cross-origin reads. */
-   blocked?: true;
-   /** The worker cannot draw at all, so no later job will fare better. */
-diff --git a/packages/web/src/lib/artwork/shrink.ts b/packages/web/src/lib/artwork/shrink.ts
-index bfe727aff..47574f69d 100644
---- a/packages/web/src/lib/artwork/shrink.ts
-+++ b/packages/web/src/lib/artwork/shrink.ts
-@@ -13,7 +13,7 @@ import {
-   keepDrawn,
-   type Drawn,
- } from './drawn';
--import type { ShrinkJob, ShrinkReply, WashJob } from './messages';
-+import type { FitJob, ShrinkJob, ShrinkReply, WashJob } from './messages';
- import { imageAccept, noteRead, refused } from './reads';
- 
- export type Shrunk =
-@@ -78,6 +78,11 @@ const queue: Pending[] = [];
- const running = new Map<number, { job: Pending; slot: Slot }>();
- /** Washes asked of the first worker, which keeps each title's. */
- const washing = new Map<number, (made: Washed | null | undefined) => void>();
-+/** Images being fitted to a width, answered with an address the worker made, or null. */
-+const fitting = new Map<
-+  number,
-+  (reply: ShrinkReply | null, maker?: Worker) => void
-+>();
- /** Blobs a worker is making an address for, kept to make one here if it fails. */
- const addressing = new Map<
-   number,
-@@ -151,6 +156,12 @@ function start(): Slot | null {
-       const { url, ...entry } = e.data.encoded;
-       keepDrawn(url, { ...entry, maker: worker });
-     }
-+    const fitDone = fitting.get(e.data.id);
-+    if (fitDone) {
-+      fitting.delete(e.data.id);
-+      fitDone(e.data, worker);
-+      return;
-+    }
-     const washed = washing.get(e.data.id);
-     if (washed) {
-       washing.delete(e.data.id);
-@@ -199,6 +210,8 @@ function start(): Slot | null {
-     addressing.clear();
-     for (const resolve of washing.values()) resolve(undefined);
-     washing.clear();
-+    for (const resolve of fitting.values()) resolve(null);
-+    fitting.clear();
-   };
-   slots.push(slot);
-   return slot;
-@@ -221,6 +234,10 @@ if (TV)
-       peakRunning,
-       kept: drawnStats().count,
-       keptMB: Math.round(drawnStats().bytes / 1048576),
-+      fitDrawn: fitStats.drawn,
-+      fitPassed: fitStats.passed,
-+      fitFailed: fitStats.failed,
-+      fitError: fitStats.error,
-     });
- 
- /** Starts another worker only while every one is busy. */
-@@ -399,3 +416,113 @@ export function washArtwork(url: string): Promise<Washed | null | undefined> {
-     } satisfies WashJob);
-   });
- }
-+
-+interface Fitted {
-+  /** The fitted image's address, or null to show the original. */
-+  done: Promise<string | null>;
-+  users: number;
-+}
-+
-+/** Fitted images by address and width, least recently held first. */
-+const fitted = new Map<string, Fitted>();
-+/** Unheld ones kept, as the hero comes back round to its backdrops. */
-+const FIT_SPARE = 4;
-+/**
-+ * One at a time: where the engine can't decode at a smaller size, each holds
-+ * the whole image decoded while it's drawn down.
-+ */
-+let fitQueue: Promise<unknown> = Promise.resolve();
-+
-+/** How the fits went, for the TV app's memory log. */
-+const fitStats = { drawn: 0, passed: 0, failed: 0, error: '' };
-+
-+function fitFailed(why: string): null {
-+  fitStats.failed++;
-+  fitStats.error = why;
-+  return null;
-+}
-+
-+function fitOnWorker(url: string, maxWidth: number): Promise<string | null> {
-+  // The first worker draws the artwork background's washes.
-+  const slot = broken ? undefined : slots[slots.length - 1];
-+  // eslint-disable-next-line lingui/no-unlocalized-strings -- only logged
-+  if (!slot) return Promise.resolve(fitFailed('no worker'));
-+  // eslint-disable-next-line lingui/no-unlocalized-strings -- only logged
-+  if (refused(url)) return Promise.resolve(fitFailed('host refused before'));
-+  const id = nextId++;
-+  return new Promise((resolve) => {
-+    fitting.set(id, (reply, maker) => {
-+      if (reply?.blocked) noteRead(url, false);
-+      else if (reply?.src) noteRead(url, true);
-+      if (!reply?.src || !maker)
-+        return resolve(
-+          fitFailed(
-+            // eslint-disable-next-line lingui/no-unlocalized-strings -- only logged
-+            reply?.blocked ? 'blocked' : (reply?.error ?? 'worker failed')
-+          )
-+        );
-+      if (reply.drawnDown) fitStats.drawn++;
-+      else fitStats.passed++;
-+      const src = reply.src;
-+      revokers.set(src, () => maker.postMessage({ revoke: src }));
-+      resolve(src);
-+    });
-+    slot.worker.postMessage({
-+      id,
-+      fit: true,
-+      url,
-+      maxWidth,
-+      accept: imageAccept(),
-+    } satisfies FitJob);
-+  });
-+}
-+
-+const revokers = new Map<string, () => void>();
-+
-+function pruneFitted() {
-+  let spare = 0;
-+  for (const entry of fitted.values()) if (!entry.users) spare++;
-+  for (const [key, entry] of fitted) {
-+    if (spare <= FIT_SPARE) break;
-+    if (entry.users) continue;
-+    fitted.delete(key);
-+    spare--;
-+    void entry.done.then((src) => {
-+      if (!src) return;
-+      revokers.get(src)?.();
-+      revokers.delete(src);
-+    });
-+  }
-+}
-+
-+/**
-+ * `url` no wider than `maxWidth` device pixels, made by a worker and held
-+ * until `release`: `done` gives its address, or null to show `url` itself
-+ * (AIOStreamsTVOS).
-+ */
-+export function holdFitted(
-+  url: string,
-+  maxWidth: number
-+): { done: Promise<string | null>; release: () => void } {
-+  const key = `${url} ${maxWidth}`;
-+  let entry = fitted.get(key);
-+  if (entry) fitted.delete(key);
-+  else {
-+    const done = fitQueue.then(() => fitOnWorker(url, maxWidth));
-+    fitQueue = done.catch(() => undefined);
-+    entry = { done: done.catch(() => null), users: 0 };
-+  }
-+  fitted.set(key, entry);
-+  entry.users++;
-+  const held = entry;
-+  let released = false;
-+  return {
-+    done: held.done,
-+    release: () => {
-+      if (released) return;
-+      released = true;
-+      held.users--;
-+      if (!held.users) pruneFitted();
-+    },
-+  };
-+}
-diff --git a/packages/web/src/lib/artwork/worker.ts b/packages/web/src/lib/artwork/worker.ts
-index 8c9a1cde1..8f20df28c 100644
---- a/packages/web/src/lib/artwork/worker.ts
-+++ b/packages/web/src/lib/artwork/worker.ts
-@@ -1,4 +1,4 @@
--import type { ShrinkJob, ShrinkReply, WashJob } from './messages';
-+import type { FitJob, ShrinkJob, ShrinkReply, WashJob } from './messages';
- import { readImage, writeImage } from '@/lib/cache/store';
- import {
-   drawWash,
-@@ -267,6 +267,67 @@ async function shrink({
-   return { id, bitmap };
- }
- 
-+/**
-+ * The image no wider than `maxWidth`: its own bytes when it already is, else
-+ * drawn down to that width and encoded again (AIOStreamsTVOS). Some hosts the
-+ * server can't ask for a size, as Fanart.tv, send backdrops 3840 wide, which
-+ * an `<img>` holds decoded at 33 MB each where 1920 takes 8.
-+ */
-+async function fit({ id, url, maxWidth, accept }: FitJob): Promise<ShrinkReply> {
-+  if (typeof OffscreenCanvas !== 'function')
-+    // eslint-disable-next-line lingui/no-unlocalized-strings -- only logged
-+    return { id, error: 'no OffscreenCanvas', unsupported: true };
-+  const data = await load(url, accept);
-+  if (!(data instanceof ArrayBuffer)) return { id, ...data };
-+  const head = sniff(new Uint8Array(data, 0, Math.min(data.byteLength, 65536)));
-+  // eslint-disable-next-line lingui/no-unlocalized-strings -- only logged
-+  if (!head) return { id, error: 'unknown image type' };
-+  const blob = new Blob([data], { type: head.type });
-+  if (!head.width || !head.height || head.width <= maxWidth)
-+    return { id, src: URL.createObjectURL(blob), bytes: data.byteLength };
-+
-+  const width = maxWidth;
-+  const height = Math.max(1, Math.round((head.height * maxWidth) / head.width));
-+  // Decoded at the smaller size where the engine can, so the whole image is never held.
-+  let source: CanvasImageSource;
-+  let close: () => void;
-+  try {
-+    const bitmap = await createImageBitmap(blob, {
-+      resizeWidth: width,
-+      resizeHeight: height,
-+      resizeQuality: 'high',
-+    });
-+    source = bitmap;
-+    close = () => bitmap.close();
-+  } catch {
-+    const image = await decodeFor(data, head, width, height);
-+    source = image.source;
-+    close = image.close;
-+  }
-+  const canvas = new OffscreenCanvas(width, height);
-+  try {
-+    const ctx = canvas.getContext('2d');
-+    // eslint-disable-next-line lingui/no-unlocalized-strings -- only logged
-+    if (!ctx) return { id, error: 'no 2d context', unsupported: true };
-+    ctx.imageSmoothingQuality = 'high';
-+    ctx.drawImage(source, 0, 0, width, height);
-+  } finally {
-+    close();
-+  }
-+  // A PNG may be see-through; a backdrop otherwise is not.
-+  const fitted = await canvas.convertToBlob(
-+    head.type === 'image/png'
-+      ? { type: 'image/png' }
-+      : { type: 'image/jpeg', quality: 0.92 }
-+  );
-+  return {
-+    id,
-+    src: URL.createObjectURL(fitted),
-+    bytes: fitted.size,
-+    drawnDown: true,
-+  };
-+}
-+
- /** Each title's wash, so showing one again only draws it out. */
- const washes = new Map<string, Wash>();
- const WASHES_MAX = 60;
-@@ -397,7 +458,11 @@ async function encodeLater() {
- 
- scope.onmessage = (
-   e: MessageEvent<
--    ShrinkJob | WashJob | { revoke: string } | { id: number; blob: Blob }
-+    | ShrinkJob
-+    | WashJob
-+    | FitJob
-+    | { revoke: string }
-+    | { id: number; blob: Blob }
-   >
- ) => {
-   // An address made here, which the page no longer shows.
-@@ -409,7 +474,7 @@ scope.onmessage = (
-     } satisfies ShrinkReply);
-   const job = e.data;
-   active++;
--  ('wash' in job ? wash(job) : shrink(job))
-+  ('wash' in job ? wash(job) : 'fit' in job ? fit(job) : shrink(job))
-     .then(
-       (reply) => scope.postMessage(reply, reply.bitmap ? [reply.bitmap] : []),
-       (err) =>

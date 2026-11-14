@@ -1064,15 +1064,20 @@ enum BridgeScript {
       }
     }
     /*
-     * Which element holds the largest picture, and whence: a blob was made in the page (patch
-     * 0042 fits backdrops into one), anything else is the host's own copy. Named so a picture
-     * past the screen's width can be traced to what drew it.
+     * Which element holds the largest picture, and whence: the app's `/fit/` copy (patch 0042,
+     * ImageFit.swift), a blob the page made, or the host's own copy. Named so a picture past the
+     * screen's width can be traced to what drew it.
      */
     let largestFrom = '';
     try {
       if (largestImg) {
         const src = largestImg.currentSrc || largestImg.src || '';
-        const at = src.startsWith('blob:') ? 'a blob' : new URL(src, location.href).host;
+        const address = new URL(src, location.href);
+        const at = src.startsWith('blob:')
+          ? 'a blob'
+          : address.pathname.startsWith('/fit/') && address.protocol === 'aiostv:'
+            ? 'the app, drawn down'
+            : address.host;
         const named =
           largestImg.getAttribute('data-ui') ||
           largestImg.closest('[data-ui]')?.getAttribute('data-ui') ||
@@ -1088,6 +1093,7 @@ enum BridgeScript {
      * What the page's artwork workers are doing (the web app's lib/artwork.ts,
      * patch 0027). Their decodes happen inside the page's process but are in
      * none of the counts above, so a kill with few pictures may be theirs.
+     * None at all is reported too: this WebKit may not start them for the app's scheme.
      */
     let art = {};
     try {
@@ -1102,11 +1108,6 @@ enum BridgeScript {
       artPeak: art.peakRunning || 0,
       artKept: art.kept || 0,
       artKeptMB: art.keptMB || 0,
-      // Backdrops patch 0042 drew down, passed through as they were, or showed as sent and why.
-      fitDrawn: art.fitDrawn || 0,
-      fitPassed: art.fitPassed || 0,
-      fitFailed: art.fitFailed || 0,
-      fitError: String(art.fitError || ''),
       largestFrom,
       // What was on screen that the reloads with "Background from artwork" on point at.
       artWash: document.documentElement.hasAttribute('data-art-wash'),
