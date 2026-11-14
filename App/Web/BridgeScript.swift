@@ -259,10 +259,14 @@ enum BridgeScript {
    * it runs, WebKit makes that canvas a layer of its own, the screen's size at 2x, and with it
    * every part of the page drawn over it, so they stay above it. Resting on card after card started
    * fade after fade, and the page's process was ended for memory with only its usual pictures
-   * held (116 MB in 66). Here the fade is stepped from the page each frame instead, on the same
-   * curve, which WebKit draws without making layers for it.
+   * held (116 MB in 66). With ART_FADES_STEPPED, the fade is stepped from the page each frame
+   * instead, on the same curve, which WebKit draws without making layers for it.
+   *
+   * Off: the page went on being ended with the fade stepped, until the pictures were drawn to the
+   * size they're shown at (ImageFit), and stepped, each frame repaints the whole screen beneath
+   * the page, which lags each change of background. Upstream's own fade runs on the GPU.
    */
-  const ART_FADES_STEPPED = true;
+  const ART_FADES_STEPPED = false;
   // CSS's `ease-out`, cubic-bezier(0, 0, 0.58, 1): the progress at `x` of the time, found by bisection.
   const easeOut = (x) => {
     const at = (t, a, b) => 3 * a * t * (1 - t) * (1 - t) + 3 * b * t * t * (1 - t) + t * t * t;
