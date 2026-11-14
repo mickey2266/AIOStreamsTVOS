@@ -185,6 +185,31 @@ static NSString *AIOMimeType(NSString *extension) {
         return;
     }
     if (!self.liveTasks) self.liveTasks = [NSHashTable weakObjectsHashTable];
+    if ([path isEqualToString:@"/wash"]) {
+        // The artwork background's wash, made by the app (patches/web/0043, ArtWash.swift).
+        AIOWebView *owner = self.owner;
+        NSString *address = nil;
+        for (NSURLQueryItem *item in [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO].queryItems) {
+            if ([item.name isEqualToString:@"u"]) address = item.value;
+        }
+        NSURL *source = address ? [NSURL URLWithString:address] : nil;
+        if (!owner.washImage || !source) {
+            [self answer:task url:url path:path data:nil type:nil extra:nil];
+            return;
+        }
+        [self.liveTasks addObject:task];
+        __weak AIOWebKitDelegate *weakSelf = self;
+        owner.washImage(source, ^(NSData *png, NSString *tint, NSString *panel) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                AIOWebKitDelegate *strongSelf = weakSelf;
+                if (!strongSelf || ![strongSelf.liveTasks containsObject:task]) return;
+                [strongSelf.liveTasks removeObject:task];
+                NSDictionary *extra = png && tint && panel ? @{@"X-Wash-Tint": tint, @"X-Wash-Panel": panel} : nil;
+                [strongSelf answer:task url:url path:path data:(extra ? png : nil) type:@"image/png" extra:extra];
+            });
+        });
+        return;
+    }
     if ([path hasPrefix:@"/fit/"]) {
         // A picture the page asked the app to draw down (patches/web/0042, ImageFit.swift).
         AIOWebView *owner = self.owner;
@@ -250,17 +275,28 @@ static NSString *AIOMimeType(NSString *extension) {
 
 /** As above, with the type given rather than taken from the path's extension. */
 - (void)answer:(id)task url:(NSURL *)url path:(NSString *)path data:(nullable NSData *)data type:(nullable NSString *)type {
+    [self answer:task url:url path:path data:data type:type extra:nil];
+}
+
+/** As above, with headers of its own added, such as a wash's colours. */
+- (void)answer:(id)task
+           url:(NSURL *)url
+          path:(NSString *)path
+          data:(nullable NSData *)data
+          type:(nullable NSString *)type
+         extra:(nullable NSDictionary<NSString *, NSString *> *)extra {
     NSInteger status = data ? 200 : 404;
     data = data ?: [NSData data];
     BOOL hashed = status == 200 && [path hasPrefix:@"/static/"];
-    // A fitted picture's address names its source, which doesn't change under it.
-    BOOL fitted = status == 200 && [path hasPrefix:@"/fit/"];
-    NSDictionary *headers = @{
+    // A fitted picture's or a wash's address names its source, which doesn't change under it.
+    BOOL fitted = status == 200 && ([path hasPrefix:@"/fit/"] || [path isEqualToString:@"/wash"]);
+    NSMutableDictionary *headers = [@{
         @"Content-Type": data.length ? (type ?: AIOMimeType(path.pathExtension)) : @"text/plain",
         @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)data.length],
         @"Cache-Control": hashed ? @"public, max-age=31536000, immutable"
                                  : fitted ? @"public, max-age=86400" : @"no-cache",
-    };
+    } mutableCopy];
+    if (status == 200 && extra) [headers addEntriesFromDictionary:extra];
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:url
                                                               statusCode:status
                                                              HTTPVersion:@"HTTP/1.1"

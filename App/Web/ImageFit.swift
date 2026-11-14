@@ -40,7 +40,8 @@ enum ImageFit {
     private static let keptMaxBytes = 32 << 20
     /// One at a time, so at most one picture is being made at once.
     private static let queue = DispatchQueue(label: "io.github.aiostreams.image-fit", qos: .userInitiated)
-    private static let session: URLSession = {
+    /// Shared with ArtWash, so a title's art is fetched once for both.
+    static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 20
         // Every picture on the page comes through here, so originals are kept on disk too.

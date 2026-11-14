@@ -107,6 +107,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
         }
         web.thumbnailAtPath = { ThumbnailStore.image($0) }
         web.fitImage = { source, width, done in ImageFit.fit(source, width: width, done: done) }
+        web.washImage = { source, done in ArtWash.make(source) { done($0?.png, $0?.tint, $0?.panel) } }
 
         startPlayer()
         setUpInput()

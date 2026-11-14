@@ -1,0 +1,41 @@
+diff --git a/packages/web/src/lib/artwork/background.ts b/packages/web/src/lib/artwork/background.ts
+index 659f66a51..3493adc5d 100644
+--- a/packages/web/src/lib/artwork/background.ts
++++ b/packages/web/src/lib/artwork/background.ts
+@@ -5,6 +5,7 @@ import { useSession } from '@/lib/jellyfin/session';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
+ import { usePageShown } from '@/lib/page-shown';
+ import { settings, useSetting } from '@/lib/settings';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import { imageAccept } from './reads';
+ import { washArtwork } from './shrink';
+ import { backdropUrls, posterUrl } from './urls';
+@@ -90,7 +91,28 @@ async function washHere(src: string): Promise<WashFrame | null> {
+   return { src, image, tint: wash.tint, panel: wash.panel };
+ }
+ 
++/**
++ * Made by the Apple TV app, from the same steps, at `/wash?u=<address>` on the
++ * page's own scheme: a PNG, with its colours in `X-Wash-Tint` and
++ * `X-Wash-Panel`. That WebKit doesn't start the artwork workers for the app's
++ * scheme, so each change of background was made on the page's own thread
++ * (AIOStreamsTVOS).
++ */
++async function washInApp(src: string): Promise<WashFrame | null> {
++  const address = new URL(src, location.href).href;
++  const res = await fetch(`/wash?u=${encodeURIComponent(address)}`);
++  const tint = res.headers.get('X-Wash-Tint');
++  const panel = res.headers.get('X-Wash-Panel');
++  if (!res.ok || !tint || !panel) return null;
++  const image = await createImageBitmap(await res.blob());
++  return { src, image, tint, panel };
++}
++
+ async function frameOf(src: string): Promise<WashFrame | null> {
++  if (appleTv()) {
++    const made = await washInApp(src).catch(() => null);
++    if (made) return made;
++  }
+   const made = await washArtwork(src);
+   if (made === undefined) return washHere(src).catch(() => null);
+   return (

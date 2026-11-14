@@ -54,6 +54,14 @@ typedef NS_ENUM(NSInteger, AIOPageEnd) {
  */
 @property (nonatomic, copy, nullable) void (^fitImage)(NSURL *source, NSInteger width,
                                                        void (^done)(NSData *_Nullable data, NSString *_Nullable type));
+/**
+ * The artwork background's wash of the art at `source`, for a `/wash?u=<address>` path: `done`
+ * with a PNG and the wash's edge colour and panel shade, or nils. Called on the main thread;
+ * `done` may be called on any.
+ */
+@property (nonatomic, copy, nullable) void (^washImage)(NSURL *source,
+                                                        void (^done)(NSData *_Nullable png, NSString *_Nullable tint,
+                                                                     NSString *_Nullable panel));
 /** In place of WebKit's own user agent. */
 @property (nonatomic, copy, nullable) NSString *userAgent;
 
