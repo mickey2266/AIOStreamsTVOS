@@ -1,0 +1,33 @@
+diff --git a/packages/web/src/lib/playback/now-playing.ts b/packages/web/src/lib/playback/now-playing.ts
+index f297e8b3e..1af58831d 100644
+--- a/packages/web/src/lib/playback/now-playing.ts
++++ b/packages/web/src/lib/playback/now-playing.ts
+@@ -10,7 +10,7 @@ import { settings, useSetting } from '@/lib/settings';
+ import { useLatest } from '@/hooks/use-latest';
+ import type { PlayerController } from './controller';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
+-import { appBridge } from '@/lib/hosts/shell/bridge';
++import { appBridge, appleTv } from '@/lib/hosts/shell/bridge';
+ 
+ /** How far the position may stray from where it should be before the browser is told again. */
+ const DRIFT_MS = 2000;
+@@ -56,10 +56,15 @@ export function useNowPlaying(
+   const imdb = (item.Type === 'Episode' ? show.data : item)?.ProviderIds?.Imdb;
+   const title = itemTitle(item);
+   const subtitle = itemSubtitle(item) || null;
+-  const artwork =
+-    backdropUrl(client, item, { maxWidth: 960 }) ??
+-    landscapeUrl(client, item, { maxWidth: 320 }) ??
+-    posterUrl(client, item, { maxWidth: 200 });
++  // On an Apple TV, the movie's or show's poster, as tvOS's own apps show
++  // there; an episode's is its show's (AIOStreamsTVOS).
++  const artwork = appleTv()
++    ? (posterUrl(client, item, { maxWidth: 600 }) ??
++      backdropUrl(client, item, { maxWidth: 960 }) ??
++      landscapeUrl(client, item, { maxWidth: 320 }))
++    : (backdropUrl(client, item, { maxWidth: 960 }) ??
++      landscapeUrl(client, item, { maxWidth: 320 }) ??
++      posterUrl(client, item, { maxWidth: 200 }));
+   const { started, paused, durationMs, rate } = player.state;
+   const { playhead } = player;
+   const hasNext = !!actions.onNext;
