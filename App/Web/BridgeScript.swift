@@ -732,7 +732,29 @@ enum BridgeScript {
         el.type === 'number' ||
         el.type === 'tel',
       url: el.type === 'url' || el.inputMode === 'url',
+      ...keyboardLook(),
     });
+  };
+
+  /*
+   * What the page's own background looks like, for the keyboard's box to be drawn the same, solid:
+   * the theme's colour, and with "Background from artwork" on, the artwork wash the page shows
+   * (upstream's components/shell/art-wash.tsx), a 320x180 canvas stretched over the screen.
+   */
+  const keyboardLook = () => {
+    const look = {};
+    try {
+      const page = document.querySelector("[data-ui='page-background']");
+      const colour = page && getComputedStyle(page).backgroundColor;
+      if (colour) look.background = colour;
+      if (document.documentElement.hasAttribute('data-art-wash')) {
+        const shown = [...document.querySelectorAll("[data-ui='art-wash'] canvas")].find(
+          (c) => c.style.visibility === 'visible' && c.style.zIndex === '1'
+        );
+        if (shown) look.wash = shown.toDataURL('image/jpeg', 0.92);
+      }
+    } catch {}
+    return look;
   };
 
   /*
@@ -1018,6 +1040,7 @@ enum BridgeScript {
     let artworkBytes = 0;
     let largest = 0;
     let largestSize = '';
+    let largestImg = null;
     let releasedCount = 0;
     for (const img of document.images) {
       if (img.getAttribute('src') === BLANK) {
@@ -1037,8 +1060,26 @@ enum BridgeScript {
       if (bytes > largest) {
         largest = bytes;
         largestSize = `${w}x${h}`;
+        largestImg = img;
       }
     }
+    /*
+     * Which element holds the largest picture, and whence: a blob was made in the page (patch
+     * 0042 fits backdrops into one), anything else is the host's own copy. Named so a picture
+     * past the screen's width can be traced to what drew it.
+     */
+    let largestFrom = '';
+    try {
+      if (largestImg) {
+        const src = largestImg.currentSrc || largestImg.src || '';
+        const at = src.startsWith('blob:') ? 'a blob' : new URL(src, location.href).host;
+        const named =
+          largestImg.getAttribute('data-ui') ||
+          largestImg.closest('[data-ui]')?.getAttribute('data-ui') ||
+          'img';
+        largestFrom = `${named} from ${at}`;
+      }
+    } catch {}
     let canvasBytes = 0;
     const canvases = document.getElementsByTagName('canvas');
     for (const c of canvases) canvasBytes += c.width * c.height * 4;
@@ -1061,6 +1102,15 @@ enum BridgeScript {
       artPeak: art.peakRunning || 0,
       artKept: art.kept || 0,
       artKeptMB: art.keptMB || 0,
+      // Backdrops patch 0042 drew down, passed through as they were, or showed as sent and why.
+      fitDrawn: art.fitDrawn || 0,
+      fitPassed: art.fitPassed || 0,
+      fitFailed: art.fitFailed || 0,
+      fitError: String(art.fitError || ''),
+      largestFrom,
+      // What was on screen that the reloads with "Background from artwork" on point at.
+      artWash: document.documentElement.hasAttribute('data-art-wash'),
+      cardPreview: !!document.querySelector('[data-ui="open-card"]:not(.invisible)'),
       layers: document.querySelectorAll('[data-glide-layer]').length,
       episodes: document.querySelectorAll('[data-ui="episode-card"],[data-ui="episode-list-item"]').length,
       path: location.pathname + location.search + location.hash,

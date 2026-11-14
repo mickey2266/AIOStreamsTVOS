@@ -159,18 +159,29 @@ enum MemoryLog {
         peakPictureMB = max(peakPictureMB ?? 0, pictureMB)
         var text = "pictures \(pictureMB) MB in \(int("pictures"))"
         text += " (artwork \(int("artworkMB")) MB in \(int("artwork")), \(int("released")) released"
-        if let largest = message.text("largest"), !largest.isEmpty { text += ", largest \(largest)" }
+        if let largest = message.text("largest"), !largest.isEmpty {
+            text += ", largest \(largest)"
+            if let from = message.text("largestFrom"), !from.isEmpty { text += " (\(from))" }
+        }
         text += ")"
         if int("canvases") > 0 { text += ", canvases \(int("canvasMB")) MB in \(int("canvases"))" }
         if int("videos") > 0 { text += ", \(int("videos")) videos" }
         text += ", \(int("cards")) cards, \(int("elements")) elements"
         if int("episodes") > 0 { text += ", \(int("episodes")) episodes" }
         if int("layers") > 0 { text += ", \(int("layers")) glide layers" }
+        if message.flag("artWash") == true { text += ", artwork background shown" }
+        if message.flag("cardPreview") == true { text += ", a card preview open" }
         // The artwork workers decode inside the page's process, outside the picture counts above.
         if int("artWorkers") > 0 {
             text += ", artwork workers \(int("artWorkers")): \(int("artRunning")) running"
             text += " (\(int("artSlow")) slow, most \(int("artPeak"))), \(int("artQueued")) queued"
             text += ", \(int("artKeptMB")) MB kept in \(int("artKept"))"
+        }
+        // Backdrops drawn down to the screen's width (patches/web/0042), and why any weren't.
+        let fits = int("fitDrawn") + int("fitPassed") + int("fitFailed")
+        if fits > 0 {
+            text += ", backdrops \(int("fitDrawn")) drawn down, \(int("fitPassed")) as sent, \(int("fitFailed")) failed"
+            if let error = message.text("fitError"), !error.isEmpty { text += " (last: \(error))" }
         }
         lastStats = text
     }

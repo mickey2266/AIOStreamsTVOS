@@ -408,6 +408,7 @@ final class MainViewController: UIViewController, RemoteReceiver {
         let keyboard = SearchKeyboard(
             text: message.text("value") ?? "",
             prompt: message.text("label") ?? "",
+            look: KeyboardLook(background: message.text("background"), wash: message.text("wash")),
             keyboardType: message.flag("email") == true ? .emailAddress : message.flag("url") == true ? .URL : .default,
             onChange: { [weak self] text in
                 guard let self else { return }

@@ -1,6 +1,48 @@
 import UIKit
 
 /**
+ * What the page's background looks like as the keyboard opens, so the box
+ * behind the keys is drawn the same rather than black: the theme's colour,
+ * and the artwork wash over it when the page shows one. Solid either way, so
+ * the page's rows and text don't show through the keys.
+ */
+struct KeyboardLook {
+    var colour: UIColor = .black
+    var wash: UIImage?
+
+    init() {}
+
+    /// From the page: a CSS colour as `getComputedStyle` gives it, and a data URL of the wash.
+    init(background: String?, wash: String?) {
+        if let background, let colour = Self.colour(background) { self.colour = colour }
+        if let wash, let comma = wash.firstIndex(of: ","), wash.hasPrefix("data:image/"),
+           let data = Data(base64Encoded: String(wash[wash.index(after: comma)...])) {
+            self.wash = UIImage(data: data)
+        }
+    }
+
+    /// `rgb(r, g, b)` or `rgba(r, g, b, a)`, drawn opaque: the page's own background is.
+    private static func colour(_ css: String) -> UIColor? {
+        guard let open = css.firstIndex(of: "("), let close = css.lastIndex(of: ")"), open < close else { return nil }
+        let parts = css[css.index(after: open)..<close]
+            .split(whereSeparator: { $0 == "," || $0 == " " || $0 == "/" })
+            .compactMap { Double($0) }
+        guard parts.count >= 3, css.hasPrefix("rgb") else { return nil }
+        return UIColor(red: parts[0] / 255, green: parts[1] / 255, blue: parts[2] / 255, alpha: 1)
+    }
+
+    /// The wash as the page draws it, over the whole screen: stretched to cover, as `object-cover` does.
+    func washView() -> UIImageView? {
+        guard let wash else { return nil }
+        let view = UIImageView(image: wash)
+        view.contentMode = .scaleAspectFill
+        view.clipsToBounds = true
+        view.isUserInteractionEnabled = false
+        return view
+    }
+}
+
+/**
  * tvOS's own search keyboard, shown over the page for one of the page's text
  * fields. Each change goes straight into the page's field, so a search's
  * results update while typing. Menu, or moving off the keyboard, closes it
@@ -19,6 +61,7 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
     init(
         text: String,
         prompt: String,
+        look: KeyboardLook = KeyboardLook(),
         keyboardType: UIKeyboardType,
         onChange: @escaping (String) -> Void,
         onClose: @escaping (_ submit: Bool) -> Void
@@ -29,7 +72,8 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         let below = BelowKeyboard()
         search = UISearchController(searchResultsController: below)
         let container = Container(searchController: search)
-        let host = KeyboardHost(container: container)
+        container.look = look
+        let host = KeyboardHost(container: container, look: look)
         controller = host
         super.init()
 
@@ -44,7 +88,7 @@ final class SearchKeyboard: NSObject, UISearchResultsUpdating, UISearchBarDelega
         bar.autocapitalizationType = .none
 
         // Over the page, which shows through beside or below the keyboard. Faded in, as tvOS fades its
-        // keyboard in, so the black box behind it comes with it rather than sliding up from below.
+        // keyboard in, so the box behind it comes with it rather than sliding up from below.
         host.modalPresentationStyle = .overFullScreen
         host.modalTransitionStyle = .crossDissolve
         host.view.backgroundColor = .clear
@@ -167,8 +211,15 @@ private final class KeyboardHost: UIViewController {
     private var detectQueued = false
     private var focusWatch: NSObjectProtocol?
 
-    init(container: Container) {
+    /// The page's background as it opened, which the box behind the keys is drawn in.
+    private let look: KeyboardLook
+    /// The artwork wash at the screen's size, seen through the box where the page shows it.
+    private let boxWash: UIImageView?
+
+    init(container: Container, look: KeyboardLook) {
         self.container = container
+        self.look = look
+        boxWash = look.washView()
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -182,7 +233,9 @@ private final class KeyboardHost: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         box.layer.cornerRadius = 28
-        box.backgroundColor = .black
+        box.backgroundColor = look.colour
+        box.clipsToBounds = true
+        if let boxWash { box.addSubview(boxWash) }
         box.isUserInteractionEnabled = false
         box.isHidden = true
         leftOfBox.reached = { [weak self] in self?.leave() }
@@ -257,6 +310,8 @@ private final class KeyboardHost: UIViewController {
                 box.frame = CGRect(x: keys.minX - Self.gridMargin, y: 0,
                                    width: keys.width + 2 * Self.gridMargin,
                                    height: min(keys.maxY + Self.gridMargin, bounds.height))
+                // The wash at the screen's size and place, so the box shows the part of it beneath.
+                boxWash?.frame = CGRect(origin: CGPoint(x: -box.frame.minX, y: -box.frame.minY), size: bounds.size)
                 box.isHidden = false
             } else {
                 box.isHidden = true
@@ -390,8 +445,9 @@ private final class KeyboardHost: UIViewController {
 
 /**
  * Reports when it goes, however it was closed: Menu, moving off the keyboard,
- * or return. Draws a solid backdrop behind the keyboard, so the page doesn't
- * show through its keys; the page still shows where tvOS puts the results.
+ * or return. Draws a solid backdrop behind the keyboard in the page's own
+ * background (`KeyboardLook`), so the page doesn't show through its keys; the
+ * page still shows where tvOS puts the results.
  * With the linear keyboard that's below it; with the grid keyboard (Settings →
  * General → Keyboard), beside it, and the backdrop then covers the keyboard's
  * column down the whole screen as well as the strip above.
@@ -404,11 +460,18 @@ private final class Container: UISearchContainerViewController {
     }
     private let backdrop = UIView()
     private let cutOut = CAShapeLayer()
+    /// The page's background as it opened, which the backdrop is drawn in. Set before the view loads.
+    var look = KeyboardLook()
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // tvOS has no systemBackground; the app's dark style is black.
-        backdrop.backgroundColor = .black
+        // The page's own colour, and its artwork wash where it shows one; black without either.
+        backdrop.backgroundColor = look.colour
+        if let wash = look.washView() {
+            wash.frame = backdrop.bounds
+            wash.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            backdrop.addSubview(wash)
+        }
         backdrop.isUserInteractionEnabled = false
         backdrop.isHidden = !showsBackdrop
         cutOut.fillRule = .evenOdd
