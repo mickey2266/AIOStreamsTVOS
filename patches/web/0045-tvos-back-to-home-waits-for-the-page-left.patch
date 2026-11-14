@@ -1,5 +1,5 @@
 diff --git a/packages/web/src/components/shell/layout.tsx b/packages/web/src/components/shell/layout.tsx
-index 5952027cf..4ff15e20c 100644
+index 5952027cf..33bf1bbf7 100644
 --- a/packages/web/src/components/shell/layout.tsx
 +++ b/packages/web/src/components/shell/layout.tsx
 @@ -36,6 +36,7 @@ import { pageOpening } from '@/lib/page-open';
@@ -10,7 +10,7 @@ index 5952027cf..4ff15e20c 100644
  import { useDiscordBrowsing } from '@/lib/discord';
  import { useServerEvents } from '@/features/remote/server-events';
  import { downloadsHost, useDownloadRunner } from '@/lib/downloads';
-@@ -117,6 +118,36 @@ export function PageBackground() {
+@@ -117,6 +118,60 @@ export function PageBackground() {
    );
  }
  
@@ -44,18 +44,43 @@ index 5952027cf..4ff15e20c 100644
 +  return onHome && (!staged || shown);
 +}
 +
++/**
++ * The page shown other than Home. On an Apple TV a new page waits, as Home
++ * does, until the page it replaces has been taken down and a frame drawn
++ * without it: one title page built as the last was let go, a few in quick
++ * succession, ended the page's process (AIOStreamsTVOS).
++ */
++function useStagedPath(pathname: string): string | undefined {
++  const staged = appleTv();
++  const [shown, setShown] = React.useState(pathname);
++  React.useEffect(() => {
++    if (!staged) return;
++    let timer = 0;
++    const frame = requestAnimationFrame(() => {
++      timer = window.setTimeout(() => setShown(pathname), HOME_AFTER_MS);
++    });
++    return () => {
++      cancelAnimationFrame(frame);
++      clearTimeout(timer);
++    };
++  }, [pathname, staged]);
++  if (!staged) return pathname;
++  return shown === pathname ? pathname : undefined;
++}
++
  function pageName(pathname: string): string {
    return pathname.split('/')[1] || 'home';
  }
-@@ -165,6 +196,7 @@ export function WebLayout() {
+@@ -165,6 +220,8 @@ export function WebLayout() {
    // starts afresh.
    const [kept, setKept] = React.useState<string>();
    if (onHome && kept !== entry) setKept(entry);
 +  const homeShown = useHomeShown(onHome);
++  const pageShown = useStagedPath(pathname);
    const activity: SidebarItem = {
      id: 'activity',
      name: t`Activity`,
-@@ -428,17 +460,17 @@ export function WebLayout() {
+@@ -428,20 +485,20 @@ export function WebLayout() {
                            key={kept}
                            data-page="home"
                            {...PAGE_FADE}
@@ -76,4 +101,8 @@ index 5952027cf..4ff15e20c 100644
 +                          {homeShown && <PageScroll />}
                          </motion.div>
                        )}
-                       {!onHome && !playing && (
+-                      {!onHome && !playing && (
++                      {!onHome && !playing && pageShown && (
+                         <motion.div
+                           key={pathname}
+                           data-page={pageName(pathname)}

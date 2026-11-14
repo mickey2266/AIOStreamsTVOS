@@ -46,6 +46,11 @@ enum BridgeScript {
    * process out of memory while browsing. At 1 it takes the 1080p sizes, a
    * quarter of the memory; tvOS's own apps draw artwork at that size too.
    */
+  // WebKit's own ratio, which it still draws at, kept for the memory log.
+  let drawScale = 0;
+  try {
+    drawScale = window.devicePixelRatio || 0;
+  } catch {}
   try {
     Object.defineProperty(window, 'devicePixelRatio', { get: () => 1, configurable: true });
   } catch {}
@@ -1164,6 +1169,8 @@ enum BridgeScript {
     } catch {}
     return {
       type: 'tvos-page-stats',
+      drawScale,
+      viewport: `${innerWidth}x${innerHeight}`,
       artWorkers: art.workers || 0,
       artQueued: art.queued || 0,
       artRunning: art.running || 0,

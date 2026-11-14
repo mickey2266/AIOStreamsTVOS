@@ -151,6 +151,17 @@ enum MemoryLog {
     /// The page's own count of what it holds, from its last `tvos-page-stats`, and the largest picture total seen.
     private static var lastStats: String?
     private static var lastStatsAt: Date?
+    /// The page's size and WebKit's own drawing scale, before the bridge reports 1 to the page.
+    private static var pageScale: String?
+
+    /// How sharply the screen draws: whether artwork past 1920 wide could show at all.
+    private static var screenText: String {
+        let screen = UIScreen.main
+        let size = screen.nativeBounds.size
+        var text = "Screen: \(Int(size.width))x\(Int(size.height)) pixels, scale \(String(format: "%g", screen.scale)) (native \(String(format: "%g", screen.nativeScale)))"
+        if let page = pageScale { text += "; \(page)" }
+        return text
+    }
     private static var peakPictureMB: Int?
 
     /// The page's last few moves from page to page, newest last, so an end can be put next to one.
@@ -199,6 +210,9 @@ enum MemoryLog {
         }
         lastStats = text
         lastStatsAt = Date()
+        if let viewport = message.text("viewport") {
+            pageScale = "the page is \(viewport) at a drawing scale of \(message.number("drawScale").map { String(format: "%g", $0) } ?? "?")"
+        }
     }
 
     /// WebKit's word that the page's process stopped answering it, or answers again.
@@ -264,7 +278,7 @@ enum MemoryLog {
         var peak = peakWebMB.map { ", the page at most \($0) MB" } ?? ""
         if let gpu = peakGpuMB { peak += ", WebKit graphics at most \(gpu) MB" }
         if let pictures = peakPictureMB { peak += ", the page's pictures at most \(pictures) MB" }
-        var head = ["Memory: \(now); the page reloaded \(pageEnds) times since launch\(peak)", routeText]
+        var head = ["Memory: \(now); the page reloaded \(pageEnds) times since launch\(peak)", screenText, routeText]
         if let stats = lastStats { head.append("The page now holds \(stats)") }
         return head + lines
     }
