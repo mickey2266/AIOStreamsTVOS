@@ -1,0 +1,211 @@
+diff --git a/packages/web/src/components/media/media-row.tsx b/packages/web/src/components/media/media-row.tsx
+index e5211c415..c3c4e94f2 100644
+--- a/packages/web/src/components/media/media-row.tsx
++++ b/packages/web/src/components/media/media-row.tsx
+@@ -12,6 +12,7 @@ import { Skeleton } from '@aiostreams/ui/skeleton';
+ import { cn } from '@aiostreams/ui/core/styling';
+ import { useMediaQuery } from '@aiostreams/ui/hooks/media-query';
+ import { currentHost } from '@/lib/hosts';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import { scrolled, scrollToStart, startOf } from '@/lib/direction';
+ import {
+   settings,
+@@ -101,9 +102,15 @@ function useWindow(count: number, start: number) {
+     });
+   }, []);
+   if (count <= WINDOWED)
+-    return { drawn: () => true, fades: () => true, onView: view };
++    return {
++      drawn: () => true,
++      fades: () => true,
++      onView: view,
++      range: undefined,
++    };
+   return {
+     drawn: (i: number) => i >= range[0] && i < range[1],
++    range,
+     // Only the first cards fade in; later ones are drawn ahead of the view.
+     fades: (i: number) => i >= first[0] && i < first[1],
+     onView: view,
+@@ -212,6 +219,21 @@ const Slide = React.memo(function Slide({
+   );
+ });
+ 
++/**
++ * Holds the place of a run of cards a long row isn't drawing, as one box
++ * rather than a slot each: rows paged far hold thousands (AIOStreamsTVOS).
++ */
++function RowGap({ cards, pitch }: { cards: number; pitch: number }) {
++  return (
++    <div
++      aria-hidden
++      data-row-gap
++      className="shrink-0 grow-0"
++      style={{ width: cards * pitch }}
++    />
++  );
++}
++
+ /**
+  * Marks the cards in `box` out of sight of `root` (and `rootMargin` around it)
+  * `data-nav-out`, so arrow navigation needn't measure them. `count` re-arms it
+@@ -219,7 +241,7 @@ const Slide = React.memo(function Slide({
+  */
+ function useMarkOutOfView(
+   box: React.RefObject<HTMLElement | null>,
+-  count: number,
++  count: number | string,
+   root: React.RefObject<Element | null> | Element | null,
+   rootMargin?: string,
+   enabled = true
+@@ -261,6 +283,7 @@ function NativeRow({
+   start,
+   onEnd,
+   onView,
++  onPitch,
+   count,
+   children,
+ }: {
+@@ -269,8 +292,10 @@ function NativeRow({
+   onEnd?: () => void;
+   /** Told the first and last card in view as the row scrolls. */
+   onView?: (first: number, last: number) => void;
+-  /** How many cards, so new ones are watched too. */
+-  count: number;
++  /** Told how wide a card is, unrounded, so gaps can hold their places. */
++  onPitch?: (width: number) => void;
++  /** How many cards, or which are drawn, so new ones are watched too. */
++  count: number | string;
+   children: React.ReactNode;
+ }) {
+   const ref = React.useRef<HTMLDivElement>(null);
+@@ -331,16 +356,26 @@ function NativeRow({
+       const range = el.scrollWidth - el.clientWidth;
+       if (onEnd && (range <= 1 || scrolled(el) / range > 0.7)) onEnd();
+       const row = content.current;
+-      const [first, second] = row?.children ?? [];
++      const first = row?.firstElementChild;
++      // A gap holding the place of undrawn cards starts where the first card would.
++      const card = first?.hasAttribute('data-row-gap')
++        ? first.nextElementSibling
++        : first;
++      const second = card?.nextElementSibling;
+       if (
+         !onView ||
+         !row ||
+         !(first instanceof HTMLElement) ||
+-        !(second instanceof HTMLElement)
++        !(card instanceof HTMLElement) ||
++        !(second instanceof HTMLElement) ||
++        second.hasAttribute('data-row-gap')
+       )
+         return;
++      // Not an opened card's, which it widens.
++      const sized = [card, second].find((el) => !el.style.flexBasis);
++      if (sized) onPitch?.(sized.getBoundingClientRect().width);
+       // The cards are all one width.
+-      const pitch = startOf(second, row) - startOf(first, row);
++      const pitch = startOf(second, row) - startOf(card, row);
+       const from = scrolled(el) - startOf(row, el) - startOf(first, row);
+       if (pitch > 0)
+         onView(
+@@ -355,7 +390,7 @@ function NativeRow({
+       cancelAnimationFrame(first);
+       el.removeEventListener('scroll', check);
+     };
+-  }, [restoreKey, onEnd, onView, count]);
++  }, [restoreKey, onEnd, onView, onPitch, count]);
+   useMarkOutOfView(content, count, ref, undefined, !!currentHost().tv);
+   return (
+     <div
+@@ -440,11 +475,26 @@ export function MediaRow({
+     () => React.Children.toArray(children),
+     [children]
+   );
+-  const { drawn, fades, onView } = useWindow(items.length, start);
++  const { drawn, fades, onView, range } = useWindow(items.length, start);
++  const [pitch, setPitch] = React.useState(0);
++  const onPitch = React.useCallback(
++    (width: number) =>
++      setPitch((was) => (Math.abs(was - width) < 0.01 ? was : width)),
++    []
++  );
+   // A finger scrolls a plain scroller on the compositor; Embla is for a mouse to drag.
+   const touch = useMediaQuery('(pointer: coarse)');
+   if (!loading && !items.length) return null;
+   const native = !!currentHost().tv || touch;
++  // On the Apple TV, once a card's width is known, the undrawn cards each side
++  // are one box apiece rather than a slot each (AIOStreamsTVOS).
++  const gaps =
++    native &&
++    appleTv() &&
++    !loading &&
++    pitch > 0 &&
++    !!range &&
++    range[0] < items.length;
+   const skeletons = (count: number) =>
+     Array.from({ length: count }, (_, i) => (
+       <Slide key={`skeleton-${i}`} className={width}>
+@@ -460,15 +510,39 @@ export function MediaRow({
+   const cards = [
+     ...(loading
+       ? skeletons(waiting ? 1 : 8)
+-      : items.map((child, i) =>
+-          drawn(i) ? (
+-            <Slide key={i} className={width} fade={fades(i) ? i : undefined}>
+-              {child}
+-            </Slide>
+-          ) : (
+-            <Slide key={i} className={width} />
+-          )
+-        )),
++      : gaps && range
++        ? [
++            ...(range[0] > 0
++              ? [<RowGap key="gap-start" cards={range[0]} pitch={pitch} />]
++              : []),
++            ...items.slice(range[0], range[1]).map((child, j) => (
++              <Slide
++                key={range[0] + j}
++                className={width}
++                fade={fades(range[0] + j) ? range[0] + j : undefined}
++              >
++                {child}
++              </Slide>
++            )),
++            ...(range[1] < items.length
++              ? [
++                  <RowGap
++                    key="gap-end"
++                    cards={items.length - range[1]}
++                    pitch={pitch}
++                  />,
++                ]
++              : []),
++          ]
++        : items.map((child, i) =>
++            drawn(i) ? (
++              <Slide key={i} className={width} fade={fades(i) ? i : undefined}>
++                {child}
++              </Slide>
++            ) : (
++              <Slide key={i} className={width} />
++            )
++          )),
+     ...(!loading && loadingMore ? skeletons(4) : []),
+   ];
+   const head = (
+@@ -516,7 +590,12 @@ export function MediaRow({
+             start={start}
+             onEnd={onEndReached}
+             onView={onView}
+-            count={cards.length}
++            onPitch={appleTv() ? onPitch : undefined}
++            count={
++              gaps && range
++                ? `${range[0]}:${range[1]}:${cards.length}`
++                : cards.length
++            }
+           >
+             {cards}
+           </NativeRow>
