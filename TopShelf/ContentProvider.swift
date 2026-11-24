@@ -12,11 +12,13 @@ final class ContentProvider: TVTopShelfContentProvider {
         // The app writes a list, even an empty one, whenever the page sends it. With none where this
         // extension can read it (the app not opened since it was installed, or a signing that gave
         // the two no App Group in common), tvOS shows the Top Shelf image; the app menu lists the groups.
-        guard TopShelfStore.hasList else {
+        // Off in the page's Top Shelf setting (patches/web/0104): the Top Shelf image, as with nothing to show.
+        guard TopShelfStore.hasList, TopShelfStore.style != .off else {
             TopShelfStore.noteAsked(shown: 0)
             return completionHandler(nil)
         }
         let items = TopShelfStore.load()
+        posters = TopShelfStore.style == .posters
         // The rows' titles in the page's language, as its home page words them.
         let text = TopShelfText.text(for: TopShelfStore.language)
         // With the page's "Merge Continue Watching and Next Up" on, one row in the home page's order.
@@ -38,12 +40,17 @@ final class ContentProvider: TVTopShelfContentProvider {
         return section
     }
 
+    /// The page's Top Shelf setting is posters: each title's movie or show poster, for those that have one.
+    private var posters = false
+
     private func shelfItem(_ item: TopShelfItem) -> TVTopShelfSectionedItem? {
         guard let play = item.playURL else { return nil }
         let shelf = TVTopShelfSectionedItem(identifier: item.id)
         shelf.title = item.label
-        shelf.imageShape = .hdtv
-        if let image = item.image.flatMap(URL.init(string:)) {
+        // A title without a poster keeps its picture, in the poster's shape so the row lines up.
+        let poster = posters ? item.poster : nil
+        shelf.imageShape = posters ? .poster : .hdtv
+        if let image = (poster ?? item.image).flatMap(URL.init(string:)) {
             shelf.setImageURL(image, for: .screenScale1x)
             shelf.setImageURL(image, for: .screenScale2x)
         }

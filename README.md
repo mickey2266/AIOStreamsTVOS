@@ -377,7 +377,7 @@ the bridge script adds the button to the page's controls, in the look of the pag
 ### Top Shelf
 
 With the app in the top row of the home screen, the Top Shelf shows **Continue Watching** and
-**Next Up** from your Jellyfin server. The page already builds this list for Android TV's Watch Next
+**Next Up** from your Jellyfin server, by default. The page already builds this list for Android TV's Watch Next
 row (the home page's resume points and next episodes, 10 at most) and sends it as a `watch-next`
 message whenever it changes, and an empty one on sign-out. The app saves it in an App Group
 container it shares with its Top Shelf extension (`TopShelf/`), and tells tvOS to ask the extension
@@ -387,6 +387,11 @@ again.
   list as one **Continue Watching** row, in the home page's order, as the home page does. The page
   says so with the list (`merged` on `watch-next`, `patches/web/0074-tvos-top-shelf-merges-next-up.patch`)
   and sends it again when the setting changes.
+- **Top Shelf**, in a Home screen card of its own after the Home card in the settings, a setting
+  of the Apple TV app's own for this Apple TV, picks what it shows: Continue watching and next up with their landscape pictures (the
+  default), the same titles as movie and show posters (an episode shows its show's), or Off, which
+  leaves the Top Shelf image. The page sends the choice with the list (`shelf` on `watch-next`, and
+  each title's `poster`, `patches/web/0104-tvos-top-shelf-setting.patch`).
 - Selecting a title opens its page in the app (`aiostreams://item/…`); Play plays it, from where it
   stopped (`aiostreams://play/…`).
 - The list is as of the app's last run: the page asks the server again a couple of seconds after

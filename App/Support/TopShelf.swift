@@ -14,8 +14,10 @@ enum TopShelf {
         let items = (message["items"] as? [Message] ?? []).compactMap(item)
         // The page's "Merge Continue Watching and Next Up" (patches/web/0074): one row, as the home page shows.
         let merged = message.flag("merged") == true
-        if items == TopShelfStore.load(), merged == TopShelfStore.merged, lastSaved { return }
-        let saved = TopShelfStore.save(items, merged: merged)
+        // The page's Top Shelf setting (patches/web/0104); a list sent without it, as at sign-out, keeps the last.
+        let style = message.text("shelf").flatMap(TopShelfStyle.init(rawValue:)) ?? TopShelfStore.style
+        if items == TopShelfStore.load(), merged == TopShelfStore.merged, style == TopShelfStore.style, lastSaved { return }
+        let saved = TopShelfStore.save(items, merged: merged, style: style)
         lastSaved = saved
         if saved {
             TVTopShelfContentProvider.topShelfContentDidChange()
@@ -38,7 +40,8 @@ enum TopShelf {
             episodeTitle: entry.text("episodeTitle"),
             season: entry.number("season").map { Int($0) },
             number: entry.number("episode").map { Int($0) },
-            image: entry.text("image").map(TopShelfStore.sized),
+            image: entry.text("image").map { TopShelfStore.sized($0) },
+            poster: entry.text("poster").map { TopShelfStore.sized($0, width: TopShelfStore.posterWidth) },
             positionMs: entry.number("positionMs") ?? 0,
             durationMs: entry.number("durationMs"),
             link: link

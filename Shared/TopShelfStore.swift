@@ -11,6 +11,9 @@ struct TopShelfItem: Codable, Equatable {
     var number: Int?
     /// The page's landscape artwork, at the size the Top Shelf draws.
     var image: String?
+    /// The movie's or show's poster, for the Top Shelf set to posters (`TopShelfStyle.posters`). Missing in
+    /// a list saved before the setting.
+    var poster: String?
     var positionMs: Double
     var durationMs: Double?
     /// `aiostreams://play/<id>?server=…&start=…`
@@ -47,6 +50,16 @@ struct TopShelfItem: Codable, Equatable {
     }
 }
 
+/// What the Top Shelf shows of the list, as the page's Top Shelf setting (patches/web/0104) picks.
+enum TopShelfStyle: String {
+    /// Each title's landscape picture, as Continue Watching and Next Up show them (the default).
+    case thumbnails
+    /// The movies' and shows' posters.
+    case posters
+    /// Nothing: tvOS shows the app's Top Shelf image.
+    case off
+}
+
 /**
  * Where the app leaves the Top Shelf's list for the extension: a folder in
  * each App Group this process is signed with. Sideloading tools rename the
@@ -60,6 +73,8 @@ enum TopShelfStore {
 
     /// The Top Shelf's artwork width, in pixels: 548 points at 2x.
     static let imageWidth = 1096
+    /// A poster's, in pixels: the sectioned Top Shelf draws them 404 points wide, at 2x.
+    static let posterWidth = 808
 
     /// The App Groups this process was signed with.
     static let entitled = entitledGroups()
@@ -81,6 +96,7 @@ enum TopShelfStore {
 
     private static let listName = "items.json"
     private static let mergedName = "merged.txt"
+    private static let styleName = "style.txt"
     private static let languageName = "language.txt"
     private static let askedName = "asked.txt"
     private static func settingsKey(_ name: String) -> String { "aiostreams.topShelf.\(name)" }
@@ -156,11 +172,17 @@ enum TopShelfStore {
     /// The page merges Next Up into Continue Watching, so the Top Shelf shows the list as one row.
     static var merged: Bool { newest(mergedName).flatMap { String(data: $0, encoding: .utf8) } == "1" }
 
-    /// The list, and whether it shows as one row; written before the list, which the extension reads by.
+    /// What the Top Shelf shows of the list; thumbnails until the page says otherwise.
+    static var style: TopShelfStyle {
+        newest(styleName).flatMap { String(data: $0, encoding: .utf8) }.flatMap(TopShelfStyle.init(rawValue:)) ?? .thumbnails
+    }
+
+    /// The list, whether it shows as one row, and how; written before the list, which the extension reads by.
     @discardableResult
-    static func save(_ items: [TopShelfItem], merged: Bool) -> Bool {
+    static func save(_ items: [TopShelfItem], merged: Bool, style: TopShelfStyle) -> Bool {
         guard let data = try? JSONEncoder().encode(items) else { return false }
         _ = write(Data((merged ? "1" : "0").utf8), as: mergedName)
+        _ = write(Data(style.rawValue.utf8), as: styleName)
         return write(data, as: listName)
     }
 
@@ -180,11 +202,11 @@ enum TopShelfStore {
     }
 
     /// The page asks Jellyfin for artwork 400 wide, for its own row; the Top Shelf draws it wider.
-    static func sized(_ url: String) -> String {
+    static func sized(_ url: String, width: Int = imageWidth) -> String {
         guard var parts = URLComponents(string: url) else { return url }
         // The rest as the page encoded it.
         var query = (parts.percentEncodedQueryItems ?? []).filter { $0.name.lowercased() != "maxwidth" }
-        query.append(URLQueryItem(name: "maxWidth", value: String(imageWidth)))
+        query.append(URLQueryItem(name: "maxWidth", value: String(width)))
         parts.percentEncodedQueryItems = query
         return parts.string ?? url
     }

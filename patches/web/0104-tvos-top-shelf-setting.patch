@@ -1,0 +1,472 @@
+diff --git a/packages/web/src/app/settings/browsing.tsx b/packages/web/src/app/settings/browsing.tsx
+index f9df7715e..6af78629e 100644
+--- a/packages/web/src/app/settings/browsing.tsx
++++ b/packages/web/src/app/settings/browsing.tsx
+@@ -11,12 +11,16 @@ import {
+   MAX_FEATURED,
+   HERO_SECONDS,
+   TRAILER_SPOTS,
++  TOP_SHELF_STYLES,
+   type EpisodeLayout,
+   type HeroMode,
+   type LiveTvPlace,
+   type PosterLine,
+   type PosterSize,
++  type TopShelfStyle,
+ } from '@/lib/settings';
++import { appleTv } from '@/lib/hosts/shell/bridge';
++import { tvText } from '@/lib/hosts/shell/tvos-text';
+ import { SettingsCard } from './_components/settings-card';
+ import { seconds, deviceOnly, DeviceOnly } from './_components/common';
+ 
+@@ -133,6 +137,37 @@ function HomeCard() {
+   );
+ }
+ 
++/**
++ * The Apple TV app's Top Shelf, over its icon on the home screen (`settings.interface.topShelf`,
++ * AIOStreamsTVOS). For this Apple TV only. In the app's own catalog (`tvText`).
++ */
++function TopShelfCard() {
++  const [shelf, setShelf] = useSetting(settings.interface.topShelf);
++  const labels: Record<TopShelfStyle, string> = {
++    thumbnails: tvText('topShelf.thumbnails'),
++    posters: tvText('topShelf.posters'),
++    off: t`Off`,
++  };
++  return (
++    <SettingsCard
++      name="top-shelf"
++      title={tvText('topShelf.card')}
++      holds="device"
++    >
++      <Select
++        label={tvText('topShelf.label')}
++        help={tvText('topShelf.help')}
++        options={TOP_SHELF_STYLES.map((value) => ({
++          value,
++          label: labels[value],
++        }))}
++        value={shelf}
++        onValueChange={(value) => setShelf(value as TopShelfStyle)}
++      />
++    </SettingsCard>
++  );
++}
++
+ export function BrowsingSection() {
+   const [combineSearch, setCombineSearch] = useSetting(
+     settings.interface.combineSearch
+@@ -160,6 +195,7 @@ export function BrowsingSection() {
+   return (
+     <>
+       <HomeCard />
++      {appleTv() && <TopShelfCard />}
+       <SettingsCard
+         name="posters-and-grids"
+         title={t`Posters and grids`}
+diff --git a/packages/web/src/components/shell/watch-next.tsx b/packages/web/src/components/shell/watch-next.tsx
+index c1b1ff4d6..8796eb282 100644
+--- a/packages/web/src/components/shell/watch-next.tsx
++++ b/packages/web/src/components/shell/watch-next.tsx
+@@ -2,7 +2,8 @@ import React from 'react';
+ import { playLink } from '@/lib/app-links';
+ import { itemTitle, ticksToMs } from '@/lib/format';
+ import { currentHost, type WatchNextItem } from '@/lib/hosts';
+-import { landscapeUrl } from '@/lib/artwork/urls';
++import { landscapeUrl, posterUrl } from '@/lib/artwork/urls';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import {
+   mergeRows,
+   useNextUp,
+@@ -37,6 +38,10 @@ export function WatchNextSync() {
+           episode: (episode && item.IndexNumber) || undefined,
+           description: item.Overview || undefined,
+           image: landscapeUrl(client, item, { maxWidth: 400 }) ?? undefined,
++          // An episode's is its show's (AIOStreamsTVOS).
++          poster: appleTv()
++            ? (posterUrl(client, item, { maxWidth: 400 }) ?? undefined)
++            : undefined,
+           positionMs,
+           durationMs: ticksToMs(item.RunTimeTicks) || undefined,
+           playedAt: playedAt || undefined,
+@@ -49,9 +54,11 @@ export function WatchNextSync() {
+   // the effect runs, it could be the default for a moment, as the page's settings are put back while
+   // the page draws itself again (a language change), and a wrong value then stayed.
+   const [merged] = useSetting(settings.interface.mergeNextUp);
++  // What the Top Shelf shows of them, which goes with the list in the same way.
++  const [shelf] = useSetting(settings.interface.topShelf);
+   React.useEffect(() => {
+-    if (items) currentHost().watchNext?.(items, merged);
+-  }, [items, merged]);
++    if (items) currentHost().watchNext?.(items, merged, shelf);
++  }, [items, merged, shelf]);
+   const { refetch: refetchResume } = resume;
+   const { refetch: refetchNextUp } = nextUp;
+   React.useEffect(() => {
+diff --git a/packages/web/src/lib/hosts/index.ts b/packages/web/src/lib/hosts/index.ts
+index 335e96d67..60a478ab0 100644
+--- a/packages/web/src/lib/hosts/index.ts
++++ b/packages/web/src/lib/hosts/index.ts
+@@ -8,6 +8,7 @@ import { jellyfinDesktopHost } from './jellyfin-desktop';
+ import { nativeShellHost } from './native-shell';
+ import { shellHost } from './shell';
+ import type { MediaKey } from './shell/bridge';
++import type { TopShelfStyle } from '@/lib/settings';
+ import { tizenHost } from './tizen';
+ import { keepScreenOn } from './wake-lock';
+ import { webosHost } from './webos';
+@@ -34,6 +35,8 @@ export interface WatchNextItem {
+   description?: string;
+   /** Landscape, which the row shows. */
+   image?: string;
++  /** The movie's or show's poster, for the Apple TV app's Top Shelf set to show posters (AIOStreamsTVOS). */
++  poster?: string;
+   positionMs: number;
+   durationMs?: number;
+   playedAt?: number;
+@@ -124,7 +127,12 @@ export interface Host {
+    * Replaces what the system's row of what to watch next shows from this app; `merged` is the
+    * home page's merge of Next Up into Continue Watching, as it renders (AIOStreamsTVOS).
+    */
+-  watchNext?(items: WatchNextItem[], merged?: boolean): void;
++  watchNext?(
++    items: WatchNextItem[],
++    merged?: boolean,
++    /** What the Apple TV app's Top Shelf shows of them (`settings.interface.topShelf`, AIOStreamsTVOS). */
++    shelf?: TopShelfStyle
++  ): void;
+ }
+ 
+ const browserHost: Host = { name: 'browser', keepAwake: keepScreenOn };
+diff --git a/packages/web/src/lib/hosts/shell/android.ts b/packages/web/src/lib/hosts/shell/android.ts
+index aafad4127..4d0f3b4de 100644
+--- a/packages/web/src/lib/hosts/shell/android.ts
++++ b/packages/web/src/lib/hosts/shell/android.ts
+@@ -105,12 +105,14 @@ const listen: NonNullable<Host['listen']> = ({ hearing, signal }) =>
+     bridge?.send({ type: 'voice-search' });
+   });
+ 
+-const watchNext: NonNullable<Host['watchNext']> = (items, merged) =>
++const watchNext: NonNullable<Host['watchNext']> = (items, merged, shelf) =>
+   appBridge()?.send({
+     type: 'watch-next',
+     items,
+     // The Apple TV app's Top Shelf shows them as one Continue Watching row, as the home page does (AIOStreamsTVOS).
+     ...(appleTv() && merged !== undefined && { merged }),
++    // And as thumbnails, posters or not at all.
++    ...(appleTv() && shelf !== undefined && { shelf }),
+   });
+ 
+ /** Saves it and applies it to what plays next. */
+diff --git a/packages/web/src/lib/hosts/shell/tvos-text.ts b/packages/web/src/lib/hosts/shell/tvos-text.ts
+index 0e29eb53f..f3ff5ab79 100644
+--- a/packages/web/src/lib/hosts/shell/tvos-text.ts
++++ b/packages/web/src/lib/hosts/shell/tvos-text.ts
+@@ -33,6 +33,11 @@ const TEXT = {
+     "toneMap.label": "HDR10 tone mapping",
+     "toneMap.help": "Maps HDR10 videos mastered brighter than your TV down to its peak brightness, so highlights keep their detail instead of clipping. Choose the peak your TV reaches. Dolby Vision, HDR10+ and HLG videos, and videos already within the peak, stay as they are. A tone-mapped video has no picture-in-picture and plays Dolby Digital Plus Atmos without its heights.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Home screen",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "What the Top Shelf over AIOStreams on the Apple TV home screen shows: continue watching and next up with their pictures, the same titles as movie and show posters, or only the app's own image.",
++    "topShelf.thumbnails": "Continue watching and next up",
++    "topShelf.posters": "Movie and show posters",
+   },
+   "ar": {
+     "about.tvosApp": "تطبيق tvOS",
+@@ -59,6 +64,11 @@ const TEXT = {
+     "toneMap.label": "رسم نغمات HDR10",
+     "toneMap.help": "يخفض سطوع فيديوهات HDR10 المُعدّة بسطوع أعلى من تلفزيونك إلى ذروة سطوعه، فتحتفظ المناطق الساطعة بتفاصيلها بدل أن تُقتطع. اختر الذروة التي يبلغها تلفزيونك. تبقى فيديوهات Dolby Vision وHDR10+ وHLG، والفيديوهات التي ضمن الذروة أصلًا، كما هي. لا تتوفر صورة داخل صورة مع الفيديو المعالَج، ويُشغَّل Dolby Digital Plus Atmos بدون الارتفاعات.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "الشاشة الرئيسية",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "ما يعرضه Top Shelf فوق AIOStreams في الشاشة الرئيسية لـ Apple TV: متابعة المشاهدة والتالي بصورها، أو العناوين نفسها كملصقات أفلام ومسلسلات، أو صورة التطبيق فقط.",
++    "topShelf.thumbnails": "متابعة المشاهدة والتالي",
++    "topShelf.posters": "ملصقات الأفلام والمسلسلات",
+   },
+   "ca": {
+     "about.tvosApp": "Aplicació de tvOS",
+@@ -85,6 +95,11 @@ const TEXT = {
+     "toneMap.label": "Mapatge de tons HDR10",
+     "toneMap.help": "Adapta els vídeos HDR10 masteritzats amb més brillantor que el teu televisor a la brillantor màxima del televisor, perquè les llums altes conservin els detalls en lloc de retallar-se. Tria el màxim que assoleix el teu televisor. Els vídeos Dolby Vision, HDR10+ i HLG, i els que ja són dins del màxim, es queden tal com són. Un vídeo amb mapatge de tons no té imatge dins d'imatge i reprodueix Dolby Digital Plus Atmos sense els canals d'alçada.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Pantalla d'inici",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "El que mostra el Top Shelf sobre AIOStreams a la pantalla d'inici de l'Apple TV: continua mirant i els següents amb les seves imatges, els mateixos títols com a pòsters de pel·lícules i sèries, o només la imatge de l'aplicació.",
++    "topShelf.thumbnails": "Continua mirant i següents",
++    "topShelf.posters": "Pòsters de pel·lícules i sèries",
+   },
+   "de": {
+     "about.tvosApp": "tvOS-App",
+@@ -111,6 +126,11 @@ const TEXT = {
+     "toneMap.label": "HDR10-Tone-Mapping",
+     "toneMap.help": "Passt HDR10-Videos, die heller gemastert wurden als dein Fernseher darstellen kann, an dessen Spitzenhelligkeit an, damit Lichter ihre Details behalten, statt abgeschnitten zu werden. Wähle die Spitzenhelligkeit, die dein Fernseher erreicht. Dolby-Vision-, HDR10+- und HLG-Videos sowie Videos, die bereits innerhalb der Spitzenhelligkeit liegen, bleiben unverändert. Ein Video mit Tone-Mapping hat kein Bild-in-Bild und spielt Dolby Digital Plus Atmos ohne Höhenkanäle ab.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Home-Bildschirm",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Was das Top Shelf über AIOStreams auf dem Home-Bildschirm des Apple TV zeigt: Weiterschauen und Als Nächstes mit ihren Bildern, dieselben Titel als Film- und Serienposter oder nur das eigene Bild der App.",
++    "topShelf.thumbnails": "Weiterschauen und Als Nächstes",
++    "topShelf.posters": "Film- und Serienposter",
+   },
+   "el": {
+     "about.tvosApp": "Εφαρμογή tvOS",
+@@ -137,6 +157,11 @@ const TEXT = {
+     "toneMap.label": "Αντιστοίχιση τόνων HDR10",
+     "toneMap.help": "Μειώνει τα βίντεο HDR10 που έχουν μαστερινγκ σε μεγαλύτερη φωτεινότητα από την τηλεόρασή σου στη μέγιστη φωτεινότητά της, ώστε τα φωτεινά σημεία να κρατούν τις λεπτομέρειές τους αντί να κόβονται. Επίλεξε τη μέγιστη φωτεινότητα της τηλεόρασής σου. Τα βίντεο Dolby Vision, HDR10+ και HLG, καθώς και τα βίντεο που είναι ήδη εντός αυτής, μένουν όπως είναι. Ένα βίντεο με αντιστοίχιση τόνων δεν έχει εικόνα μέσα σε εικόνα και παίζει το Dolby Digital Plus Atmos χωρίς τα ύψη.",
+     "toneMap.nits": "{n} νιτ",
++    "topShelf.card": "Αρχική οθόνη",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Τι δείχνει το Top Shelf πάνω από το AIOStreams στην αρχική οθόνη του Apple TV: τη συνέχεια παρακολούθησης και τα επόμενα επεισόδια με τις εικόνες τους, τους ίδιους τίτλους ως αφίσες ταινιών και σειρών, ή μόνο την εικόνα της εφαρμογής.",
++    "topShelf.thumbnails": "Συνέχεια παρακολούθησης και επόμενα",
++    "topShelf.posters": "Αφίσες ταινιών και σειρών",
+   },
+   "es": {
+     "about.tvosApp": "App de tvOS",
+@@ -163,6 +188,11 @@ const TEXT = {
+     "toneMap.label": "Mapeo de tonos HDR10",
+     "toneMap.help": "Ajusta los videos HDR10 masterizados con más brillo que tu televisor al brillo máximo de este, para que las luces altas conserven su detalle en lugar de recortarse. Elige el brillo máximo que alcanza tu televisor. Los videos Dolby Vision, HDR10+ y HLG, y los que ya están dentro del brillo máximo, se quedan como están. Un video con mapeo de tonos no tiene imagen en imagen y reproduce Dolby Digital Plus Atmos sin sus alturas.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Pantalla de inicio",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Lo que muestra el Top Shelf sobre AIOStreams en la pantalla de inicio del Apple TV: seguir viendo y a continuación con sus imágenes, los mismos títulos como pósteres de películas y series, o solo la imagen de la app.",
++    "topShelf.thumbnails": "Seguir viendo y a continuación",
++    "topShelf.posters": "Pósteres de películas y series",
+   },
+   "fi": {
+     "about.tvosApp": "tvOS-sovellus",
+@@ -189,6 +219,11 @@ const TEXT = {
+     "toneMap.label": "HDR10-sävykartoitus",
+     "toneMap.help": "Sovittaa HDR10-videot, jotka on masteroitu televisiotasi kirkkaammiksi, television huippukirkkauteen, jotta kirkkaat kohdat säilyttävät yksityiskohtansa eivätkä leikkaudu. Valitse huippu, jonka televisiosi saavuttaa. Dolby Vision-, HDR10+- ja HLG-videot sekä videot, jotka ovat jo huipun rajoissa, pysyvät ennallaan. Sävykartoitetulla videolla ei ole kuva kuvassa -toimintoa, ja se toistaa Dolby Digital Plus Atmosin ilman korkeuskanavia.",
+     "toneMap.nits": "{n} nitiä",
++    "topShelf.card": "Kotinäyttö",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Mitä Top Shelf näyttää AIOStreamsin yläpuolella Apple TV:n kotinäytössä: jatka katsomista ja seuraavaksi kuvineen, samat nimikkeet elokuvien ja sarjojen julisteina tai vain sovelluksen oman kuvan.",
++    "topShelf.thumbnails": "Jatka katsomista ja seuraavaksi",
++    "topShelf.posters": "Elokuvien ja sarjojen julisteet",
+   },
+   "fr": {
+     "about.tvosApp": "App tvOS",
+@@ -215,6 +250,11 @@ const TEXT = {
+     "toneMap.label": "Tone mapping HDR10",
+     "toneMap.help": "Ramène les vidéos HDR10 masterisées plus lumineuses que votre téléviseur à sa luminosité maximale, afin que les hautes lumières gardent leurs détails au lieu d'être écrêtées. Choisissez la luminosité maximale que atteint votre téléviseur. Les vidéos Dolby Vision, HDR10+ et HLG, ainsi que celles déjà dans la limite de la luminosité maximale, restent inchangées. Une vidéo avec tone mapping n'a pas d'image dans l'image et lit le Dolby Digital Plus Atmos sans ses canaux de hauteur.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Écran d'accueil",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Ce que le Top Shelf affiche au-dessus d'AIOStreams sur l'écran d'accueil de l'Apple TV : la reprise de la lecture et les épisodes à suivre avec leurs images, les mêmes titres en affiches de films et de séries, ou seulement l'image de l'app.",
++    "topShelf.thumbnails": "Reprendre la lecture et à suivre",
++    "topShelf.posters": "Affiches de films et de séries",
+   },
+   "he": {
+     "about.tvosApp": "אפליקציית tvOS",
+@@ -241,6 +281,11 @@ const TEXT = {
+     "toneMap.label": "מיפוי גוונים ל־HDR10",
+     "toneMap.help": "מתאים סרטוני HDR10 שמוסטרו בהירים יותר מהטלוויזיה לבהירות השיא שלה, כך שהאזורים הבהירים שומרים על הפרטים במקום להישרף. יש לבחור את השיא שהטלוויזיה מגיעה אליו. סרטוני Dolby Vision,‏ HDR10+ ו־HLG, וסרטונים שכבר נמצאים בתוך השיא, נשארים כפי שהם. בסרטון עם מיפוי גוונים אין תמונה בתוך תמונה, ו־Dolby Digital Plus Atmos מתנגן בלי ערוצי הגובה.",
+     "toneMap.nits": "{n} ניט",
++    "topShelf.card": "מסך הבית",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "מה ה-Top Shelf מעל AIOStreams במסך הבית של Apple TV מציג: המשך צפייה והבאים בתור עם התמונות שלהם, אותם כותרים כפוסטרים של סרטים וסדרות, או רק התמונה של האפליקציה.",
++    "topShelf.thumbnails": "המשך צפייה והבאים בתור",
++    "topShelf.posters": "פוסטרים של סרטים וסדרות",
+   },
+   "id": {
+     "about.tvosApp": "Aplikasi tvOS",
+@@ -267,6 +312,11 @@ const TEXT = {
+     "toneMap.label": "Tone mapping HDR10",
+     "toneMap.help": "Menurunkan video HDR10 yang dimaster lebih terang dari TV Anda ke kecerahan puncak TV, sehingga bagian terang tetap detail dan tidak terpotong. Pilih kecerahan puncak yang dicapai TV Anda. Video Dolby Vision, HDR10+, dan HLG, serta video yang sudah dalam batas puncak, tidak diubah. Video yang di-tone-map tidak mendukung picture-in-picture dan memutar Dolby Digital Plus Atmos tanpa kanal tinggi.",
+     "toneMap.nits": "{n} nit",
++    "topShelf.card": "Layar utama",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Apa yang ditampilkan Top Shelf di atas AIOStreams di layar utama Apple TV: lanjutkan menonton dan berikutnya ditonton beserta gambarnya, judul yang sama sebagai poster film dan serial, atau hanya gambar aplikasi.",
++    "topShelf.thumbnails": "Lanjutkan menonton dan berikutnya",
++    "topShelf.posters": "Poster film dan serial",
+   },
+   "it": {
+     "about.tvosApp": "App tvOS",
+@@ -293,6 +343,11 @@ const TEXT = {
+     "toneMap.label": "Tone mapping HDR10",
+     "toneMap.help": "Adatta i video HDR10 masterizzati con una luminosità superiore a quella del tuo TV al picco di luminosità del TV, così le alte luci mantengono i dettagli invece di venire tagliate. Scegli il picco che raggiunge il tuo TV. I video Dolby Vision, HDR10+ e HLG, e quelli già entro il picco, restano invariati. Un video con tone mapping non ha picture-in-picture e riproduce Dolby Digital Plus Atmos senza i canali d'altezza.",
+     "toneMap.nits": "{n} nit",
++    "topShelf.card": "Schermata Home",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Cosa mostra il Top Shelf sopra AIOStreams nella schermata Home dell'Apple TV: continua a guardare e a seguire con le loro immagini, gli stessi titoli come locandine di film e serie TV, oppure solo l'immagine dell'app.",
++    "topShelf.thumbnails": "Continua a guardare e a seguire",
++    "topShelf.posters": "Locandine di film e serie TV",
+   },
+   "ms": {
+     "about.tvosApp": "Aplikasi tvOS",
+@@ -319,6 +374,11 @@ const TEXT = {
+     "toneMap.label": "Pemetaan ton HDR10",
+     "toneMap.help": "Memetakan video HDR10 yang dimaster lebih cerah daripada TV anda kepada kecerahan puncaknya, supaya kawasan terang kekal berbutiran dan tidak terpotong. Pilih puncak yang dicapai TV anda. Video Dolby Vision, HDR10+ dan HLG, serta video yang sudah dalam had puncak, kekal seperti asal. Video yang dipetakan ton tiada Gambar dalam Gambar (PiP) dan memainkan Dolby Digital Plus Atmos tanpa ketinggiannya.",
+     "toneMap.nits": "{n} nit",
++    "topShelf.card": "Skrin utama",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Apa yang ditunjukkan Top Shelf di atas AIOStreams pada skrin utama Apple TV: teruskan menonton dan seterusnya dengan gambarnya, tajuk yang sama sebagai poster filem dan rancangan, atau hanya imej aplikasi itu sendiri.",
++    "topShelf.thumbnails": "Teruskan menonton dan seterusnya",
++    "topShelf.posters": "Poster filem dan rancangan",
+   },
+   "nb": {
+     "about.tvosApp": "tvOS-app",
+@@ -345,6 +405,11 @@ const TEXT = {
+     "toneMap.label": "HDR10-tonekartlegging",
+     "toneMap.help": "Tilpasser HDR10-videoer som er mastret lysere enn TV-en din til toppstyrken på TV-en, slik at høylys beholder detaljene i stedet for å klippes. Velg toppstyrken TV-en din klarer. Videoer i Dolby Vision, HDR10+ og HLG, og videoer som allerede ligger innenfor toppstyrken, forblir uendret. En tonekartlagt video har ikke bilde-i-bilde og spiller av Dolby Digital Plus Atmos uten høydekanalene.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Hjem-skjermen",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Hva Top Shelf over AIOStreams på Apple TV-hjemskjermen viser: fortsett å se og neste med bildene sine, de samme titlene som film- og serieplakater, eller bare appens eget bilde.",
++    "topShelf.thumbnails": "Fortsett å se og neste",
++    "topShelf.posters": "Film- og serieplakater",
+   },
+   "nl": {
+     "about.tvosApp": "tvOS-app",
+@@ -371,6 +436,11 @@ const TEXT = {
+     "toneMap.label": "HDR10-tone mapping",
+     "toneMap.help": "Past HDR10-video's die helderder zijn gemasterd dan je tv aankan aan op de piekhelderheid van de tv, zodat hooglichten hun details behouden in plaats van weg te vallen. Kies de piek die je tv haalt. Dolby Vision-, HDR10+- en HLG-video's, en video's die al binnen de piek vallen, blijven ongewijzigd. Een video met tone mapping heeft geen beeld-in-beeld en speelt Dolby Digital Plus Atmos af zonder de hoogtekanalen.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Beginscherm",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Wat de Top Shelf boven AIOStreams op het beginscherm van de Apple TV toont: verder kijken en volgende met hun afbeeldingen, dezelfde titels als film- en serieposters, of alleen de eigen afbeelding van de app.",
++    "topShelf.thumbnails": "Verder kijken en volgende",
++    "topShelf.posters": "Film- en serieposters",
+   },
+   "pl": {
+     "about.tvosApp": "Aplikacja tvOS",
+@@ -397,6 +467,11 @@ const TEXT = {
+     "toneMap.label": "Mapowanie tonów HDR10",
+     "toneMap.help": "Mapuje wideo HDR10 przygotowane jaśniej, niż potrafi Twój telewizor, do jego jasności szczytowej, dzięki czemu światła zachowują szczegóły zamiast być ucinane. Wybierz jasność szczytową swojego telewizora. Wideo Dolby Vision, HDR10+ i HLG oraz wideo mieszczące się już w tej jasności pozostają bez zmian. Wideo z mapowaniem tonów nie ma obrazu w obrazie i odtwarza Dolby Digital Plus Atmos bez kanałów wysokości.",
+     "toneMap.nits": "{n} nitów",
++    "topShelf.card": "Ekran początkowy",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Co pokazuje Top Shelf nad AIOStreams na ekranie początkowym Apple TV: kontynuuj oglądanie i następne z ich obrazami, te same tytuły jako plakaty filmów i seriali albo tylko własny obraz aplikacji.",
++    "topShelf.thumbnails": "Kontynuuj oglądanie i następne",
++    "topShelf.posters": "Plakaty filmów i seriali",
+   },
+   "pt": {
+     "about.tvosApp": "App tvOS",
+@@ -423,6 +498,11 @@ const TEXT = {
+     "toneMap.label": "Mapeamento de tons HDR10",
+     "toneMap.help": "Ajusta os vídeos HDR10 masterizados com mais brilho do que a sua TV ao brilho máximo desta, para que as luzes altas mantenham o detalhe em vez de serem cortadas. Escolha o brilho máximo que a sua TV atinge. Os vídeos Dolby Vision, HDR10+ e HLG, e os que já estão dentro do brilho máximo, ficam como estão. Um vídeo com mapeamento de tons não tem imagem na imagem e reproduz Dolby Digital Plus Atmos sem as alturas.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Ecrã principal",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "O que o Top Shelf sobre a AIOStreams no ecrã principal da Apple TV mostra: continuar a ver e a seguir com as suas imagens, os mesmos títulos como cartazes de filmes e séries, ou apenas a imagem da própria app.",
++    "topShelf.thumbnails": "Continuar a ver e a seguir",
++    "topShelf.posters": "Cartazes de filmes e séries",
+   },
+   "pt-BR": {
+     "about.tvosApp": "App tvOS",
+@@ -449,6 +529,11 @@ const TEXT = {
+     "toneMap.label": "Mapeamento de tons HDR10",
+     "toneMap.help": "Ajusta vídeos HDR10 masterizados com mais brilho do que sua TV ao brilho máximo dela, para que as luzes altas mantenham os detalhes em vez de serem cortadas. Escolha o brilho máximo que sua TV atinge. Vídeos Dolby Vision, HDR10+ e HLG, e os que já estão dentro do brilho máximo, permanecem como estão. Um vídeo com mapeamento de tons não tem picture-in-picture e reproduz Dolby Digital Plus Atmos sem as alturas.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Tela de início",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "O que o Top Shelf acima do AIOStreams na tela de início da Apple TV mostra: continuar assistindo e a seguir com suas imagens, os mesmos títulos como pôsteres de filmes e séries, ou só a imagem do próprio app.",
++    "topShelf.thumbnails": "Continuar assistindo e a seguir",
++    "topShelf.posters": "Pôsteres de filmes e séries",
+   },
+   "ro": {
+     "about.tvosApp": "Aplicația tvOS",
+@@ -475,6 +560,11 @@ const TEXT = {
+     "toneMap.label": "Mapare de tonuri HDR10",
+     "toneMap.help": "Mapează videoclipurile HDR10 masterizate mai luminos decât televizorul tău la luminozitatea maximă a acestuia, astfel încât zonele luminoase își păstrează detaliile în loc să fie tăiate. Alege luminozitatea maximă a televizorului tău. Videoclipurile Dolby Vision, HDR10+ și HLG, precum și cele deja în limita acestei luminozități, rămân neschimbate. Un videoclip cu mapare de tonuri nu are imagine în imagine și redă Dolby Digital Plus Atmos fără canalele de înălțime.",
+     "toneMap.nits": "{n} de niți",
++    "topShelf.card": "Ecranul principal",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Ce afișează Top Shelf deasupra AIOStreams pe ecranul principal al Apple TV: continuă vizionarea și urmează, cu imaginile lor, aceleași titluri ca afișe de filme și seriale sau doar imaginea aplicației.",
++    "topShelf.thumbnails": "Continuă vizionarea și urmează",
++    "topShelf.posters": "Afișe de filme și seriale",
+   },
+   "ru": {
+     "about.tvosApp": "Приложение tvOS",
+@@ -501,6 +591,11 @@ const TEXT = {
+     "toneMap.label": "Тональное отображение HDR10",
+     "toneMap.help": "Приводит видео HDR10, записанные ярче, чем может показать ваш телевизор, к его пиковой яркости, чтобы света сохраняли детали, а не обрезались. Выберите пиковую яркость вашего телевизора. Видео Dolby Vision, HDR10+ и HLG, а также видео в пределах этой яркости остаются без изменений. У видео с тональным отображением нет режима «картинка в картинке», а Dolby Digital Plus Atmos воспроизводится без каналов высоты.",
+     "toneMap.nits": "{n} нит",
++    "topShelf.card": "Экран «Домой»",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Что Top Shelf над AIOStreams показывает на экране «Домой» Apple TV: продолжить просмотр и следующие серии с их изображениями, те же названия в виде постеров фильмов и сериалов или только собственное изображение приложения.",
++    "topShelf.thumbnails": "Продолжить просмотр и следующие",
++    "topShelf.posters": "Постеры фильмов и сериалов",
+   },
+   "sl": {
+     "about.tvosApp": "Aplikacija tvOS",
+@@ -527,6 +622,11 @@ const TEXT = {
+     "toneMap.label": "Preslikava tonov HDR10",
+     "toneMap.help": "Videe HDR10, masterirane svetleje od vašega televizorja, preslika na njegovo najvišjo svetlost, da svetle točke ohranijo podrobnosti in se ne porežejo. Izberite najvišjo svetlost svojega televizorja. Videi Dolby Vision, HDR10+ in HLG ter videi, ki so že znotraj te svetlosti, ostanejo nespremenjeni. Video s preslikavo tonov nima slike v sliki in predvaja Dolby Digital Plus Atmos brez višinskih kanalov.",
+     "toneMap.nits": "{n} nitov",
++    "topShelf.card": "Domači zaslon",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Kaj Top Shelf nad AIOStreams prikazuje na domačem zaslonu Apple TV: nadaljuj ogled in naslednje z njihovimi slikami, iste naslove kot plakate filmov in serij ali samo lastno sliko aplikacije.",
++    "topShelf.thumbnails": "Nadaljuj ogled in naslednje",
++    "topShelf.posters": "Plakati filmov in serij",
+   },
+   "sv": {
+     "about.tvosApp": "tvOS-app",
+@@ -553,6 +653,11 @@ const TEXT = {
+     "toneMap.label": "HDR10-tonmappning",
+     "toneMap.help": "Anpassar HDR10-videor som är masterade ljusare än din tv till tv:ns toppljusstyrka, så att högdagrar behåller sina detaljer i stället för att klippas. Välj den toppnivå som din tv klarar. Videor i Dolby Vision, HDR10+ och HLG, och videor som redan ligger inom toppnivån, lämnas oförändrade. En tonmappad video har ingen bild-i-bild och spelar upp Dolby Digital Plus Atmos utan höjdkanalerna.",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "Hemskärmen",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Vad Top Shelf ovanför AIOStreams på Apple TV:s hemskärm visar: fortsätt titta och nästa med sina bilder, samma titlar som film- och serieaffischer, eller bara appens egen bild.",
++    "topShelf.thumbnails": "Fortsätt titta och nästa",
++    "topShelf.posters": "Film- och serieaffischer",
+   },
+   "tr": {
+     "about.tvosApp": "tvOS uygulaması",
+@@ -579,6 +684,11 @@ const TEXT = {
+     "toneMap.label": "HDR10 ton eşleme",
+     "toneMap.help": "TV'nizden daha parlak hazırlanmış HDR10 videolarını TV'nizin tepe parlaklığına indirir; böylece parlak alanlar kırpılmak yerine ayrıntısını korur. TV'nizin ulaştığı tepe değerini seçin. Dolby Vision, HDR10+ ve HLG videolar ile zaten tepe değerin içindeki videolar olduğu gibi kalır. Ton eşlenmiş videoda küçük pencere (PiP) olmaz ve Dolby Digital Plus Atmos yükseklikler olmadan oynatılır.",
+     "toneMap.nits": "{n} nit",
++    "topShelf.card": "Ana ekran",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Apple TV ana ekranında AIOStreams'in üstündeki Top Shelf'in gösterdikleri: izlemeye devam et ve sıradakiler görselleriyle, aynı yapımlar film ve dizi afişleri olarak ya da yalnızca uygulamanın kendi görseli.",
++    "topShelf.thumbnails": "İzlemeye devam et ve sıradaki",
++    "topShelf.posters": "Film ve dizi afişleri",
+   },
+   "zh-Hans": {
+     "about.tvosApp": "tvOS 应用",
+@@ -605,6 +715,11 @@ const TEXT = {
+     "toneMap.label": "HDR10 色调映射",
+     "toneMap.help": "将母带亮度高于你电视的 HDR10 视频映射到电视的峰值亮度，使高光保留细节而不是被截断。请选择你的电视能达到的峰值。Dolby Vision、HDR10+ 和 HLG 视频，以及已在峰值范围内的视频保持不变。经过色调映射的视频不支持画中画，播放 Dolby Digital Plus Atmos 时也没有高度声道。",
+     "toneMap.nits": "{n} nits",
++    "topShelf.card": "主屏幕",
++    "topShelf.label": "Top Shelf",
++    "topShelf.help": "Apple TV 主屏幕上 AIOStreams 上方的 Top Shelf 显示的内容：带有画面的继续观看和接下来播放、以电影和剧集海报显示的相同内容，或仅显示应用自己的图片。",
++    "topShelf.thumbnails": "继续观看和接下来播放",
++    "topShelf.posters": "电影和剧集海报",
+   },
+ } as const;
+ /* eslint-enable lingui/no-unlocalized-strings */
+diff --git a/packages/web/src/lib/settings/index.ts b/packages/web/src/lib/settings/index.ts
+index 2d6e7360f..b81a1b88c 100644
+--- a/packages/web/src/lib/settings/index.ts
++++ b/packages/web/src/lib/settings/index.ts
+@@ -220,6 +220,13 @@ export const HDR_TONE_MAPS = [
+ ] as const;
+ export type HdrToneMap = (typeof HDR_TONE_MAPS)[number];
+ 
++/**
++ * What the Apple TV app's Top Shelf shows of Continue watching and Next up: their landscape
++ * pictures, the movies' and shows' posters, or nothing, which leaves the app's own image (AIOStreamsTVOS).
++ */
++export const TOP_SHELF_STYLES = ['thumbnails', 'posters', 'off'] as const;
++export type TopShelfStyle = (typeof TOP_SHELF_STYLES)[number];
++
+ /** What plays versions inside the Android app. */
+ /** `auto` is the browser's own player in a browser. */
+ export const PLAYER_ENGINES = [
+@@ -434,6 +441,12 @@ export const settings = {
+       }
+     ),
+     mergeNextUp: syncedFlag('mergeNextUp'),
++    /** What the Apple TV app's Top Shelf shows, for this Apple TV (AIOStreamsTVOS). */
++    topShelf: device<TopShelfStyle>(
++      'aiostreams-web-interface-top-shelf',
++      'thumbnails',
++      TOP_SHELF_STYLES
++    ),
+     combineSearch: syncedFlag('combineSearch'),
+     blurSpoilers: syncedFlag('blurSpoilers'),
+     heroMode: syncedChoice<HeroMode>('heroMode', HERO_MODES, 'rotate'),
