@@ -1,0 +1,473 @@
+diff --git a/packages/web/src/features/player/controls.tsx b/packages/web/src/features/player/controls.tsx
+index 93af2f259..4b6a7e8f1 100644
+--- a/packages/web/src/features/player/controls.tsx
++++ b/packages/web/src/features/player/controls.tsx
+@@ -19,6 +19,7 @@ import { cn } from '@aiostreams/ui/core/styling';
+ import { clock, clockTime, itemSubtitle, itemTitle } from '@/lib/format';
+ import { currentHost } from '@/lib/hosts';
+ import { appBridge, appleTv } from '@/lib/hosts/shell/bridge';
++import type { Chapter } from '@/lib/playback/chapters';
+ import type { PlayerController } from '@/lib/playback/controller';
+ import { settings, useSetting } from '@/lib/settings';
+ import { delayNotice, syncNotice } from '@/lib/subtitles/delay';
+@@ -72,6 +73,7 @@ import { createLive, useLive, type LiveWriter } from '@/lib/live-value';
+ const IDLE_MS = 5000;
+ const BRIEF_IDLE_MS = 1500;
+ const NO_SEGMENTS: Segment[] = [];
++const NO_CHAPTERS: Chapter[] = [];
+ 
+ /** Presses closer than this are a held key's repeats. */
+ const HELD_GAP_MS = 250;
+@@ -223,8 +225,11 @@ export function PlayerControls({
+   const [clock] = useSetting(settings.controls.clock);
+   const [burstSeek, seekingTo] = useBurstSeek(player);
+   const [seekPicture, setSeekPicture] = React.useState(true);
++  // A channel the player keeps a rewind window of seeks inside it (AIOStreamsTVOS).
++  const rewind = live ? state.liveRange : undefined;
++  const floorMs = rewind?.startMs ?? 0;
+   const seekBy = (deltaMs: number, picture = true) => {
+-    if (live) return;
++    if (live && !rewind) return;
+     setSeekPicture(picture);
+     burstSeek(deltaMs);
+     showSeekFlash(deltaMs);
+@@ -234,6 +239,7 @@ export function PlayerControls({
+   const held = React.useRef({ at: 0, repeats: 0 });
+   const skippedFrom = React.useRef(0);
+   const remoteStep = (deltaMs: number, repeat: boolean) => {
++    if (live && !rewind) return false;
+     const { state, playhead, thumbnails, togglePlay } = latest.current;
+     const now = performance.now();
+     const h = held.current;
+@@ -254,12 +260,13 @@ export function PlayerControls({
+       last?.fromMs ??
+       (state.paused ? playhead.positionMs : skippedFrom.current);
+     const to = Math.max(
+-      0,
++      floorMs,
+       (last?.toMs ?? seekingTo ?? playhead.positionMs) + deltaMs * steps
+     );
++    const endMs = rewind?.endMs ?? state.durationMs;
+     scrubbing.current = {
+       fromMs,
+-      toMs: state.durationMs ? Math.min(state.durationMs, to) : to,
++      toMs: endMs ? Math.min(endMs, to) : to,
+       resume: last ? last.resume : !state.paused,
+     };
+     setScrub(scrubbing.current);
+@@ -413,7 +420,7 @@ export function PlayerControls({
+     // A remote's arrows skip with the controls hidden, and the seek bar's with them up.
+     back: !touch &&
+       !tv &&
+-      !live && {
++      (!live || !!rewind) && {
+         name: 'back',
+         label: plural(stepSeconds, {
+           one: 'Back # second',
+@@ -424,7 +431,7 @@ export function PlayerControls({
+       },
+     forward: !touch &&
+       !tv &&
+-      !live && {
++      (!live || !!rewind) && {
+         name: 'forward',
+         label: plural(stepSeconds, {
+           one: 'Forward # second',
+@@ -680,14 +687,40 @@ export function PlayerControls({
+             feed={strip}
+             atMs={scrub.toMs}
+             stepMs={seekStep * 1000}
+-            durationMs={state.durationMs}
++            startMs={floorMs}
++            fromEnd={!!rewind}
++            durationMs={rewind?.endMs ?? state.durationMs}
+           />
+         )}
+         {channel ? (
+           <LiveBar
+             channel={channel}
+             behindMs={behind.behindMs}
++            behind={behind.behind}
+             onGoLive={behind.goLive}
++            seekBar={
++              rewind && (
++                <SeekBar
++                  playhead={player.playhead}
++                  startMs={rewind.startMs}
++                  fromEnd
++                  durationMs={rewind.endMs}
++                  segments={NO_SEGMENTS}
++                  chapters={NO_CHAPTERS}
++                  previewMs={shownAt}
++                  previewPicture={!strip && (!!scrub || seekPicture)}
++                  handle={touch}
++                  thumbnails={player.thumbnails}
++                  onSeek={player.seek}
++                  onStep={(direction, held) =>
++                    tv
++                      ? remoteStep(direction * seekStep * 1000, held)
++                      : seekBy(direction * seekStep * 1000, false)
++                  }
++                  onTogglePlay={() => endScrub(true) || togglePlay()}
++                />
++              )
++            }
+           />
+         ) : (
+           <>
+diff --git a/packages/web/src/features/player/live.tsx b/packages/web/src/features/player/live.tsx
+index d8cb0b5cd..954cd2d7a 100644
+--- a/packages/web/src/features/player/live.tsx
++++ b/packages/web/src/features/player/live.tsx
+@@ -19,6 +19,7 @@ import { party } from '@/lib/party/party';
+ import { lastVersions } from '@/lib/playback/sources';
+ import { zapTo } from '@/lib/playback/session';
+ import type { PlayerController } from '@/lib/playback/controller';
++import { usePlayhead } from '@/lib/playback/playhead';
+ import { useRestoreFocus } from '@/lib/input';
+ import type { BaseItemDto } from '@/lib/jellyfin/types';
+ import { ChannelList, useRowSchedules } from '@/features/live-tv/channel-list';
+@@ -129,29 +130,51 @@ export function useBehindLive(player: PlayerController) {
+     if (reconnecting) join();
+   }, [reconnecting, join]);
+   const now = useNow(1000, pausedAt !== null);
++  // Inside a rewind window, how far the playhead is from its live end, whether a pause or a seek put it there.
++  const range = player.state.liveRange;
++  const atSecond = usePlayhead(
++    player.playhead,
++    (h) => Math.floor(h.positionMs / 1000),
++    !!range
++  );
+   const goLive = () => {
+     join();
+     player.goLive?.();
+   };
+-  return {
+-    behindMs: behindMs + (pausedAt === null ? 0 : Math.max(0, now - pausedAt)),
+-    goLive,
+-  };
++  if (range) {
++    const ms = Math.max(0, range.endMs - atSecond * 1000);
++    return { behindMs: ms, behind: ms >= WINDOW_BEHIND_MS, goLive };
++  }
++  const ms = behindMs + (pausedAt === null ? 0 : Math.max(0, now - pausedAt));
++  return { behindMs: ms, behind: ms >= 1000, goLive };
+ }
+ 
+-/** In place of the seek bar: the programme on now, and how far it has aired. */
++/**
++ * Playing at the live end, the playhead still trails it by a segment or two, so it counts as behind
++ * from this far back (AIOStreamsTVOS).
++ */
++const WINDOW_BEHIND_MS = 15_000;
++
++/**
++ * In place of the seek bar: the programme on now, and how far it has aired. A
++ * channel the player keeps a rewind window of shows a seek bar over that window
++ * in place of the programme's progress (`seekBar`).
++ */
+ export function LiveBar({
+   channel,
+   behindMs,
++  behind,
+   onGoLive,
++  seekBar,
+ }: {
+   channel: LiveChannel;
+   behindMs: number;
++  behind: boolean;
+   onGoLive(): void;
++  seekBar?: React.ReactNode;
+ }) {
+   const now = useNow();
+   const { programme } = channel;
+-  const behind = behindMs >= 1000;
+   const from = programme?.StartDate ? airTime(programme.StartDate) : null;
+   const to = programme?.EndDate ? airTime(programme.EndDate) : null;
+   return (
+@@ -204,14 +227,16 @@ export function LiveBar({
+           </span>
+         )}
+       </div>
+-      <div className="h-1 overflow-hidden rounded-full bg-white/20">
+-        <div
+-          className="h-full bg-white"
+-          style={{
+-            width: `${programme ? airedShare(programme, now) * 100 : 100}%`,
+-          }}
+-        />
+-      </div>
++      {seekBar ?? (
++        <div className="h-1 overflow-hidden rounded-full bg-white/20">
++          <div
++            className="h-full bg-white"
++            style={{
++              width: `${programme ? airedShare(programme, now) * 100 : 100}%`,
++            }}
++          />
++        </div>
++      )}
+     </div>
+   );
+ }
+diff --git a/packages/web/src/features/player/scrub-strip.tsx b/packages/web/src/features/player/scrub-strip.tsx
+index 6b84a767a..89b505dbd 100644
+--- a/packages/web/src/features/player/scrub-strip.tsx
++++ b/packages/web/src/features/player/scrub-strip.tsx
+@@ -15,11 +15,16 @@ export function ScrubStrip({
+   feed,
+   atMs,
+   stepMs,
++  startMs = 0,
++  fromEnd = false,
+   durationMs,
+ }: {
+   feed: ThumbnailFeed;
+   atMs: number;
+   stepMs: number;
++  /** A live channel's rewind window, as the seek bar's (AIOStreamsTVOS). */
++  startMs?: number;
++  fromEnd?: boolean;
+   durationMs: number;
+ }) {
+   const half = (TILES - 1) / 2;
+@@ -27,7 +32,10 @@ export function ScrubStrip({
+     { length: TILES },
+     (_, i) => atMs + (i - half) * stepMs
+   );
+-  const inside = (ms: number) => ms >= 0 && (!durationMs || ms <= durationMs);
++  const inside = (ms: number) =>
++    ms >= startMs && (!durationMs || ms <= durationMs);
++  const label = (ms: number) =>
++    fromEnd ? `-${clock(Math.max(0, durationMs - ms))}` : clock(Math.max(0, ms));
+   const wanted = positions.filter(inside).join(',');
+   React.useEffect(
+     () => feed.wantRow(wanted.split(',').map(Number), atMs),
+@@ -104,7 +112,7 @@ export function ScrubStrip({
+                   picked ? 'text-white' : 'text-gray-400'
+                 )}
+               >
+-                {clock(Math.max(0, ms))}
++                {label(ms)}
+               </span>
+             </div>
+           );
+diff --git a/packages/web/src/features/player/seek-bar.tsx b/packages/web/src/features/player/seek-bar.tsx
+index 96bbc1313..379efc6d7 100644
+--- a/packages/web/src/features/player/seek-bar.tsx
++++ b/packages/web/src/features/player/seek-bar.tsx
+@@ -19,6 +19,8 @@ export const arrowDirection = (key: string) =>
+ 
+ export function SeekBar({
+   playhead,
++  startMs = 0,
++  fromEnd = false,
+   durationMs,
+   segments,
+   chapters,
+@@ -31,6 +33,13 @@ export function SeekBar({
+   onTogglePlay,
+ }: {
+   playhead: Playhead;
++  /**
++   * Where the bar starts, for a live channel's rewind window, which then runs to its live end at
++   * `durationMs` and names times by how far behind it they are (AIOStreamsTVOS).
++   */
++  startMs?: number;
++  /** Times are named by how far before `durationMs` they are. */
++  fromEnd?: boolean;
+   durationMs: number;
+   segments: Segment[];
+   chapters: Chapter[];
+@@ -51,14 +60,20 @@ export function SeekBar({
+   const bar = React.useRef<HTMLDivElement>(null);
+   const [hover, setHover] = React.useState<number | null>(null);
+   const [drag, setDrag] = React.useState<number | null>(null);
++  const span = durationMs - startMs;
+   const at = (clientX: number) => {
+     const rect = bar.current?.getBoundingClientRect();
+-    if (!rect || !durationMs) return 0;
++    if (!rect || span <= 0) return startMs;
+     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+-    return ratio * durationMs;
++    return startMs + ratio * span;
+   };
+-  const percent = (ms: number) =>
+-    durationMs ? `${Math.min(100, (ms / durationMs) * 100)}%` : '0%';
++  /** A length, as a share of the bar. */
++  const share = (ms: number) =>
++    span > 0 ? `${Math.min(100, Math.max(0, (ms / span) * 100))}%` : '0%';
++  /** A position, as a share of the bar from its start. */
++  const percent = (ms: number) => share(ms - startMs);
++  const label = (ms: number) =>
++    fromEnd ? `-${clock(Math.max(0, durationMs - ms))}` : clock(ms);
+   const shown = drag ?? previewMs ?? positionMs;
+   const previewPeek = previewPicture ? previewMs : null;
+   // A skip lands about when its picture does, so the picture outlasts it.
+@@ -82,10 +97,10 @@ export function SeekBar({
+       ref={bar}
+       role="slider"
+       aria-label={t`Seek`}
+-      aria-valuemin={0}
++      aria-valuemin={Math.round(startMs / 1000)}
+       aria-valuemax={Math.round(durationMs / 1000)}
+       aria-valuenow={Math.round(shown / 1000)}
+-      aria-valuetext={clock(shown)}
++      aria-valuetext={label(shown)}
+       tabIndex={0}
+       data-ui="seek-bar"
+       // A timeline runs left to right in every language.
+@@ -127,7 +142,7 @@ export function SeekBar({
+             className="absolute inset-y-0 bg-white/30"
+             style={{
+               left: percent(r.startMs),
+-              width: percent(r.endMs - r.startMs),
++              width: share(r.endMs - Math.max(r.startMs, startMs)),
+             }}
+           />
+         ))}
+@@ -139,7 +154,7 @@ export function SeekBar({
+             className="absolute inset-y-0 bg-amber-300/60"
+             style={{
+               left: percent(s.startMs),
+-              width: percent(s.endMs - s.startMs),
++              width: share(s.endMs - s.startMs),
+             }}
+           />
+         ))}
+@@ -192,11 +207,12 @@ export function SeekBar({
+               className="w-full rounded-md bg-black shadow-lg ring-1 ring-white/15"
+             />
+           )}
+-          {hover !== null && (
++          {/* A remote's skips over a live channel's window name how far behind live the picture is. */}
++          {(hover !== null || fromEnd) && (
+             <span className="rounded-md bg-black/80 px-2 py-1 text-xs tabular-nums">
+               {segments.find((s) => peekMs >= s.startMs && peekMs < s.endMs)
+                 ?.type ?? chapters[chapterAt(chapters, peekMs)]?.title}{' '}
+-              {clock(peekMs)}
++              {label(peekMs)}
+             </span>
+           )}
+         </div>
+diff --git a/packages/web/src/lib/hosts/shell/bridge.ts b/packages/web/src/lib/hosts/shell/bridge.ts
+index ed78ca23e..b03c21a1c 100644
+--- a/packages/web/src/lib/hosts/shell/bridge.ts
++++ b/packages/web/src/lib/hosts/shell/bridge.ts
+@@ -48,6 +48,8 @@ export type ShellMessage =
+       subtitle?: string | null;
+       fullscreen?: boolean;
+       passthrough?: boolean;
++      /** A live source's rewind window, on the position's axis; null while it keeps none (the Apple TV app). */
++      liveRange?: TimeRange | null;
+       external?: boolean;
+     }
+   | { type: 'player-tracks'; tracks: AppTrack[]; external?: boolean }
+diff --git a/packages/web/src/lib/hosts/shell/player.ts b/packages/web/src/lib/hosts/shell/player.ts
+index ce80e71a5..4502ad348 100644
+--- a/packages/web/src/lib/hosts/shell/player.ts
++++ b/packages/web/src/lib/hosts/shell/player.ts
+@@ -233,6 +233,11 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
+               ...(m.passthrough !== undefined && {
+                 passthrough: m.passthrough,
+               }),
++              // The window a live channel rewinds in: the seek bar runs to its live end.
++              ...(m.liveRange !== undefined && {
++                liveRange: m.liveRange,
++                ...(m.liveRange && { durationMs: m.liveRange.endMs }),
++              }),
+             });
+             if (idle === undefined || !adopting) return;
+             adopting = false;
+@@ -363,6 +368,9 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
+     },
+     setSubtitleDelay: (subtitleDelayMs) =>
+       send('player-set', { subtitleDelayMs }),
++    // The Apple TV app keeps a live channel's last half hour, and goes back to its edge in it.
++    seekToLive:
++      external || !appleTv() ? undefined : () => send('player-live-edge'),
+     skipAhead:
+       external || appBridge()?.platform !== 'android'
+         ? undefined
+diff --git a/packages/web/src/lib/playback/controller.ts b/packages/web/src/lib/playback/controller.ts
+index 5912d613f..0b3e84223 100644
+--- a/packages/web/src/lib/playback/controller.ts
++++ b/packages/web/src/lib/playback/controller.ts
+@@ -7,7 +7,7 @@ import type { SubtitleStyle, VideoFit } from '@/lib/settings';
+ import type { SubtitleLine } from '@/lib/subtitles/cues';
+ import { subtitleType, type SubtitleFacts } from '@/lib/subtitles/tracks';
+ import { tagName } from '@/lib/languages';
+-import type { Playhead } from './playhead';
++import type { Playhead, TimeRange } from './playhead';
+ import type { Open, ThumbnailFeed } from './thumbnails';
+ import type { PlannedSkip, StatsRow, VideoFrame } from './engine';
+ import type { PlaybackPrefs } from '@/lib/jellyfin/user-config';
+@@ -55,6 +55,11 @@ export interface PlayerState {
+   stream?: { playSessionId: string | null; liveStreamId?: string };
+   /** In the engine's own picture-in-picture window, not on the page. */
+   pictureInPicture?: boolean;
++  /**
++   * A live source's rewind window, where the player keeps one: it seeks inside it, and
++   * `durationMs` is its live end (AIOStreamsTVOS).
++   */
++  liveRange?: TimeRange | null;
+ }
+ 
+ /** What some players add to what a browser's video can do. */
+diff --git a/packages/web/src/lib/playback/engine.ts b/packages/web/src/lib/playback/engine.ts
+index 29010aa14..649b6b724 100644
+--- a/packages/web/src/lib/playback/engine.ts
++++ b/packages/web/src/lib/playback/engine.ts
+@@ -88,6 +88,7 @@ export type EngineState = Partial<
+     | 'passthrough'
+     | 'stream'
+     | 'pictureInPicture'
++    | 'liveRange'
+   >
+ >;
+ 
+@@ -174,6 +175,8 @@ export interface PlayerEngine {
+   /** The server's subtitles once more arrive, those it opened with first. */
+   setSubtitles(subtitles: ServerSubtitle[]): void;
+   setSubtitleDelay?(ms: number): void;
++  /** Back to a live source's edge inside its rewind window (`liveRange`), without opening it again. */
++  seekToLive?(): void;
+   /** Stretches the page skips, which a player fetching ahead can leave out, or offers to, which it can fetch past early. */
+   skipAhead?(skips: PlannedSkip[]): void;
+   setStyle?(style: EngineStyle): void;
+diff --git a/packages/web/src/lib/playback/use-player.ts b/packages/web/src/lib/playback/use-player.ts
+index 169e8cc34..a2b44df43 100644
+--- a/packages/web/src/lib/playback/use-player.ts
++++ b/packages/web/src/lib/playback/use-player.ts
+@@ -489,11 +489,13 @@ export function usePlayer(
+   React.useEffect(() => {
+     const read = engine.thumbnails;
+     // A live stream has no seek bar, and opening it again can take the
+-    // provider's only connection from the player.
++    // provider's only connection from the player. The Apple TV app's live
++    // channels have one over their rewind window, and it draws their pictures
++    // from what it keeps of them, with no second connection (AIOStreamsTVOS).
+     if (
+       (!pictures && !read) ||
+       !thumbnailsOn ||
+-      liveSource ||
++      (liveSource && !engine.seekToLive) ||
+       opts.thumbnails === false
+     )
+       return;
+@@ -610,6 +612,14 @@ export function usePlayer(
+     sound: engine.sound,
+     fit: engine.fits,
+     retry,
+-    goLive: liveSource ? reopen : undefined,
++    // Inside a rewind window the player goes back to its edge; without one the source opens again there.
++    goLive: liveSource
++      ? () => {
++          if (live.current.liveRange && engine.seekToLive) {
++            engine.seekToLive();
++            if (live.current.paused) engine.setPaused(false);
++          } else reopen();
++        }
++      : undefined,
+   };
+ }

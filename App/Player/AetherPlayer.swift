@@ -82,6 +82,26 @@ final class AetherPlayer {
      */
     private var reloadedSequentially = false
     /**
+     * Catch-up read straight through from an Xtream archive (`Timeshift`), which seeks by asking for the
+     * programme again from a later minute: the minutes into it the address now playing starts at. Every
+     * position and length the page hears is moved by them, so its seek bar runs over the whole programme.
+     */
+    private var timeshiftMinutes = 0
+    private var timeshiftOffset: Double { Double(timeshiftMinutes) * 60 }
+    /// Where in that address the seek that asked for it lands, once the read holds it (`land(within:)`).
+    private var landWithin: Double?
+    /// A seek the engine was asked for on such a source, which a refusal asks the archive again for (`seekEvent`).
+    private var timeshiftSeek: Double?
+    /// The last position the page was told, in its measure, which a reload read straight through resumes from.
+    private var shownSeconds: Double = 0
+    /// A live channel's rewind window, in whole seconds, as the page was last told (`liveRangeChanged`).
+    private var lastLiveRange: (start: Int, end: Int)?
+    /// How far behind its edge a live channel keeps, to rewind into: the engine's suggested half hour,
+    /// within its disk budget (a quarter of the free space, at most 2 GB).
+    private static let liveRewindSeconds: Double = 1800
+    /// A window shorter than this isn't offered to the page: just tuned in, there's nothing to seek in.
+    private static let liveRangeLeast = 30
+    /**
      * The live channel is loading, or playing, again on AVPlayer (`LoadOptions.nativeRemoteHLS`) because the
      * engine's live-ingest reader identified none of its audio (`loaded`), so it isn't again. Seen on an IPTV
      * channel with two AC-3 tracks: "Could not find codec parameters ... unspecified sample rate" with the
@@ -211,17 +231,36 @@ final class AetherPlayer {
     /// `asLive`: loaded again as live after AVPlayer gave up on it as a finished video (`failed`).
     /// `onAVPlayer`: a live channel loaded again on AVPlayer, its audio unidentified on the engine's reader (`loaded`).
     /// `sequential`: loaded again read straight through, its origin fabricating byte ranges (`failed`).
-    private func start(_ request: LoadRequest, asLive: Bool = false, onAVPlayer: Bool = false, sequential: Bool = false) {
-        guard let url = URL(string: request.url) else { return }
+    /// `at`: such a catch-up from an Xtream archive, from that many seconds into the programme: its address
+    /// from the minute they fall in, landing on them once the read holds them (`seek`, `failed`).
+    private func start(_ request: LoadRequest, asLive: Bool = false, onAVPlayer: Bool = false, sequential: Bool = false,
+                       at seconds: Double? = nil) {
+        let shift = seconds.flatMap { at in Timeshift(request.url).map { (archive: $0, minute: Int(at / 60)) } }
+        guard let url = URL(string: shift.map { $0.archive.address(from: $0.minute) } ?? request.url) else { return }
         // Each retry keeps the other's mark, so the two can't take turns on the same file.
         reloadedAsLive = asLive || (sequential && reloadedAsLive)
         liveOnAVPlayer = onAVPlayer
         reloadedSequentially = sequential || (asLive && reloadedSequentially)
+        // As `Timeshift.address(from:)` keeps it: at least the programme's last minute.
+        timeshiftMinutes = shift.map { min($0.minute, $0.archive.minutes - 1) } ?? 0
+        timeshiftSeek = nil
+        landWithin = shift != nil ? seconds.map { $0 - timeshiftOffset }.flatMap { $0 > 1 ? $0 : nil } : nil
+        shownSeconds = shift != nil ? (seconds ?? 0) : request.startMs / 1000
+        if let shift {
+            EngineLogBook.note("[player] catch-up: its archive asked for from minute \(timeshiftMinutes) of \(shift.archive.minutes)")
+        }
         if current != nil, !ended {
             keepLastVideo(ending: onAVPlayer ? "loaded again on AVPlayer for its sound"
-                : asLive ? "loaded again as live" : "another video took its place")
-            // The same channel goes on: the page isn't told it stopped.
-            if !onAVPlayer { listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil) }
+                : asLive ? "loaded again as live"
+                : shift != nil ? "loaded again from a later minute of its archive, for a seek"
+                : "another video took its place")
+            // The same channel goes on, or the same programme for a seek: the page isn't told it stopped.
+            if !onAVPlayer && shift == nil { listener?.playerEnded(reason: "stop", error: nil, cause: nil, status: nil) }
+        }
+        // The page's seek bar runs over this channel's window, which goes with it.
+        if lastLiveRange != nil {
+            lastLiveRange = nil
+            listener?.playerState(["liveRange": NSNull()])
         }
         // The page names the new video once it starts (`now-playing`).
         if !asLive && !onAVPlayer && !sequential { title = nil }
@@ -252,7 +291,7 @@ final class AetherPlayer {
         // with `stop()` already gone, which reports nothing, and a file that picks none never changes it
         // again: the page kept the last channel's track as the one showing, its menu ticked it with nothing
         // on screen, and it never sent a pick it took as made. A pick for this file follows from the engine.
-        listener?.playerState(["idle": false, "buffering": true, "positionMs": request.startMs, "subtitle": NSNull()])
+        listener?.playerState(["idle": false, "buffering": true, "positionMs": shownSeconds * 1000, "subtitle": NSNull()])
         // With the primer, the video loads paused and starts once the link is wide (`holdForLink`).
         holdingForLink = primes
         loading?.cancel()
@@ -333,6 +372,9 @@ final class AetherPlayer {
         options.isLive = live
         // Loaded again for its sound (`liveOnAVPlayer`): AVPlayer reads the live playlist itself.
         if live && liveOnAVPlayer { options.nativeRemoteHLS = true }
+        // The last half hour of a live channel, from when it was tuned in, kept to rewind and fast forward in
+        // (`liveRangeChanged`). On AVPlayer's own reading of a playlist the playlist's window is what there is.
+        if live { options.dvrWindowSeconds = Self.liveRewindSeconds }
         // A trailer AVPlayer can open plays on AVPlayer from its own address, as another player would:
         // remuxed by the engine, a trailer's closed captions (CEA-608 in the video, or a caption track)
         // never reached AVPlayer, as the engine's playlist declares none, and the stream showed no track.
@@ -499,8 +541,12 @@ final class AetherPlayer {
         reportTracks()
         reportChapters()
         applySkipLandings()
-        if engine.duration > 0 { listener?.playerState(["durationMs": engine.duration * 1000]) }
+        if engine.duration > 0 { listener?.playerState(["durationMs": shownDurationMs(engine.duration)]) }
         listener?.playerEvent("loaded")
+        if let within = landWithin {
+            landWithin = nil
+            land(within: within)
+        }
         if holdingForLink { holdForLink() }
         if engine.isLive { nudgeFrozenLiveStart() }
         // Settings that arrived while the load ran, after it had read them.
@@ -655,7 +701,9 @@ final class AetherPlayer {
            !request.live, !request.isTrailer, !engine.isLive {
             EngineLogBook.note("[player] the origin answers byte ranges with other bytes: loading again read straight through"
                 + "\(request.durationMs == nil ? ", with no length from the page" : "")")
-            start(request, sequential: true)
+            // An Xtream archive picks up where it was, or where the page asked it to start, from that minute.
+            let resume = max(shownSeconds, request.startMs / 1000)
+            start(request, sequential: true, at: Timeshift(request.url) != nil && resume >= 60 ? resume : nil)
             return
         }
         var status: Int?
@@ -1027,11 +1075,94 @@ final class AetherPlayer {
     }
 
     func seek(_ positionMs: Double) {
-        guard current != nil else { return }
+        guard let request = current else { return }
         let seconds = max(0, positionMs / 1000)
         seekBegan = ProcessInfo.processInfo.systemUptime
         seekTarget = seconds
+        landing += 1
+        // Catch-up from an Xtream archive read straight through: the engine seeks inside what the read holds,
+        // and refuses the rest (`seekEvent`), which, as anything before where its address starts, the archive
+        // is asked for again from.
+        if !ended, !engine.isLive, engine.isSequentialOrigin || reloadedSequentially, Timeshift(request.url) != nil {
+            let within = seconds - timeshiftOffset
+            guard within >= 0 else { return start(request, sequential: true, at: seconds) }
+            timeshiftSeek = seconds
+            Task { [weak self] in await self?.engine.seek(to: within) }
+            return
+        }
+        // A live channel's seek lands inside its rewind window, which the engine keeps it to.
         Task { [weak self] in await self?.engine.seek(to: seconds) }
+    }
+
+    /// The page's Go live inside a live channel's rewind window: back to its edge, without opening it again.
+    func goLive() {
+        guard current != nil, !ended, engine.isLive else { return }
+        Task { [weak self] in await self?.engine.seekToLiveEdge() }
+    }
+
+    /// The engine's word on a seek: one a catch-up's read doesn't hold asks its archive for that minute.
+    private func seekEvent(_ event: SeekEvent) {
+        guard let wanted = timeshiftSeek else { return }
+        switch event.outcome {
+        case .rejected(.sourceNotSeekable):
+            timeshiftSeek = nil
+            guard let request = current, !ended else { return }
+            EngineLogBook.note(String(format: "[player] catch-up: %.0f s isn't in what the read holds", wanted))
+            start(request, sequential: true, at: wanted)
+        case .landed, .stalled, .superseded, .rejected:
+            timeshiftSeek = nil
+        case .began:
+            break
+        }
+    }
+
+    /// A catch-up asked for again from the minute a seek fell in: on to the second asked for once the read
+    /// holds it, which a straight read reaches at the link's speed. Given up after `landWait`.
+    private func land(within seconds: Double) {
+        landing += 1
+        let generation = self.generation, token = self.landing
+        Task { [weak self] in
+            let until = ProcessInfo.processInfo.systemUptime + Self.landWait
+            while ProcessInfo.processInfo.systemUptime < until {
+                guard let self, generation == self.generation, token == self.landing, !self.ended else { return }
+                if self.engine.clock.bufferedPosition >= seconds + 1 { break }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            guard let self, generation == self.generation, token == self.landing, !self.ended else { return }
+            await self.engine.seek(to: seconds)
+        }
+    }
+
+    private static let landWait: TimeInterval = 15
+    /// The landing under way, which a newer seek of the page's drops.
+    private var landing = 0
+
+    /// The length the page is told: a catch-up's whole programme, wherever its address now starts.
+    private func shownDurationMs(_ duration: Double) -> Double {
+        guard timeshiftMinutes > 0 else { return duration * 1000 }
+        return current?.durationMs ?? (duration + timeshiftOffset) * 1000
+    }
+
+    /**
+     * A live channel's rewind window, for the page's seek bar over it (patches/web/0103), in whole seconds
+     * on the position's axis. Sent as it changes; none while it's shorter than `liveRangeLeast`, which is
+     * also when AVPlayer reads a playlist with no window of its own.
+     */
+    private func liveRangeChanged(_ range: ClosedRange<Double>?) {
+        guard current != nil, !ended, engine.isLive else { return }
+        let next = range.flatMap { r -> (start: Int, end: Int)? in
+            guard r.lowerBound.isFinite, r.upperBound.isFinite else { return nil }
+            let start = Int(r.lowerBound.rounded(.up)), end = Int(r.upperBound.rounded(.down))
+            return end - start >= Self.liveRangeLeast ? (start, end) : nil
+        }
+        guard next?.start != lastLiveRange?.start || next?.end != lastLiveRange?.end else { return }
+        let had = lastLiveRange != nil
+        lastLiveRange = next
+        if let next {
+            listener?.playerState(["liveRange": ["startMs": Double(next.start) * 1000, "endMs": Double(next.end) * 1000]])
+        } else if had {
+            listener?.playerState(["liveRange": NSNull()])
+        }
     }
 
     /// From the server, or a file the user added, shown in place of track `replace`.
@@ -1355,11 +1486,17 @@ final class AetherPlayer {
             .removeDuplicates()
             .sink { [weak self] duration in
                 guard let self, self.current != nil, !self.ended, duration > 0 else { return }
-                self.listener?.playerState(["durationMs": duration * 1000])
+                self.listener?.playerState(["durationMs": self.shownDurationMs(duration)])
             }
             .store(in: &watching)
         engine.clock.$currentTime
             .sink { [weak self] seconds in self?.positionChanged(seconds) }
+            .store(in: &watching)
+        engine.clock.$seekableLiveRange
+            .sink { [weak self] range in self?.liveRangeChanged(range) }
+            .store(in: &watching)
+        engine.seekEvents
+            .sink { [weak self] event in self?.seekEvent(event) }
             .store(in: &watching)
         engine.clock.$sourceTime
             .sink { [weak self] seconds in self?.subtitles.setTime(seconds) }
@@ -1520,11 +1657,15 @@ final class AetherPlayer {
 
     private func positionChanged(_ seconds: Double) {
         guard current != nil, !ended, engine.state != .loading else { return }
-        var state: Message = ["positionMs": seconds * 1000]
+        // A catch-up's archive from a later minute plays from its own zero.
+        let offset = timeshiftOffset
+        shownSeconds = seconds + offset
+        var state: Message = ["positionMs": shownSeconds * 1000]
         let ahead = engine.clock.bufferedPosition
         if ahead != lastBuffered {
             lastBuffered = ahead
-            state["buffered"] = ahead > seconds ? [["startMs": seconds * 1000, "endMs": ahead * 1000]] : []
+            state["buffered"] = ahead > seconds
+                ? [["startMs": shownSeconds * 1000, "endMs": (ahead + offset) * 1000]] : []
         }
         listener?.playerState(state)
     }

@@ -101,6 +101,9 @@ final class PlayerChannel: PlayerListener {
                     player.seek(at)
                     if resumeAsked { resume() }
                 }
+            // Go live, inside a live channel's rewind window (patches/web/0103).
+            case "player-live-edge":
+                player.goLive()
             case "player-subtitle-add":
                 let url = message.text("url") ?? ""
                 guard PlayerProtocol.isWebURL(url), let address = URL(string: url) else {

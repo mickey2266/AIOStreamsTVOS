@@ -50,12 +50,14 @@ final class Thumbnails {
             guard let address = URL(string: url) else { return }
             self.url = url
             file += 1
-            extractor = engine.makeFrameExtractor(url: address, httpHeaders: headers)
+            // A live channel's pictures come from what the engine keeps of its rewind window
+            // (`liveScrubThumbnail`): a second connection could take the provider's only one from the player.
+            if !engine.isLive { extractor = engine.makeFrameExtractor(url: address, httpHeaders: headers) }
         }
         stayOpen()
-        guard let extractor else { return }
+        guard extractor != nil || engine.isLive else { return }
         guard let positionMs else {
-            Task { await extractor.prewarm() }
+            if let extractor { Task { await extractor.prewarm() } }
             return
         }
         let ms = Int64(max(0, positionMs) / 1000) * 1000
@@ -90,12 +92,19 @@ final class Thumbnails {
     }
 
     private func pump() {
-        guard !working, let ask = wanted, let extractor else { return }
+        guard !working, let ask = wanted, extractor != nil || engine.isLive else { return }
         wanted = nil
         working = true
         let file = file
+        let extractor = extractor, engine = engine
         Task { [weak self] in
-            let picture = await extractor.thumbnail(at: Double(ask.ms) / 1000, maxWidth: Self.width)
+            let seconds = Double(ask.ms) / 1000
+            let picture: CGImage?
+            if let extractor {
+                picture = await extractor.thumbnail(at: seconds, maxWidth: Self.width)
+            } else {
+                picture = await engine.liveScrubThumbnail(atSessionSeconds: seconds, maxWidth: Self.width)
+            }
             let jpeg = picture.flatMap { Self.jpeg($0) }
             guard let self else { return }
             self.working = false
@@ -121,6 +130,8 @@ final class Thumbnails {
      * the page is told there are none only once the file has given nothing for a while.
      */
     private func missed(_ ask: (ms: Int64, showing: Int64?)) {
+        // A live channel has none outside what it keeps yet, which isn't the channel having none.
+        if engine.isLive { return }
         let now = CACurrentMediaTime()
         if firstMiss == nil { firstMiss = now }
         let count = (tries[ask.ms] ?? 0) + 1
