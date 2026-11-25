@@ -38,8 +38,8 @@ final class SearchScreen: NSObject, UISearchResultsUpdating {
         super.init()
         search.searchResultsUpdater = self
         search.obscuresBackgroundDuringPresentation = false
-        // The results' space shows before anything is typed too, so the page's chips have it.
-        search.showsSearchResultsController = true
+        // tvOS keeps the results' space under or beside the keys itself (`showsSearchResultsController` is
+        // iOS only); until it says where, the page lays out for where it was last time, or its defaults.
         let bar = search.searchBar
         bar.text = text
         bar.placeholder = prompt
