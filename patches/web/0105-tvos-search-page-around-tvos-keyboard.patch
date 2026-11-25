@@ -1,0 +1,321 @@
+diff --git a/packages/web/src/app/search/page.tsx b/packages/web/src/app/search/page.tsx
+index 22e805d83..612acf0ff 100644
+--- a/packages/web/src/app/search/page.tsx
++++ b/packages/web/src/app/search/page.tsx
+@@ -14,6 +14,7 @@ import { TextInput } from '@aiostreams/ui/text-input';
+ import { cn } from '@aiostreams/ui/core/styling';
+ import { useDebounce } from '@aiostreams/ui/hooks/debounce';
+ import { currentHost, type Hearing } from '@/lib/hosts';
++import { appleTv } from '@/lib/hosts/shell/bridge';
+ import { useAction } from '@/lib/input';
+ import { useSession } from '@/lib/jellyfin/session';
+ import { useServerInfo } from '@/lib/jellyfin/server-info';
+@@ -151,6 +152,145 @@ export function SearchPage({ initialTerm }: { initialTerm: string }) {
+     !!collectionItems.length ||
+     !!episodeItems.length;
+ 
++  const resultsBlock = (
++    <>
++      {searching && (
++        <div
++          data-ui="search-results"
++          className="space-y-8"
++          onClickCapture={(e) => {
++            if ((e.target as HTMLElement).closest('a')) history.add(query);
++          }}
++        >
++          <CardPreviewHost>
++            {peopleFirst && peopleRow}
++            {combine ? (
++              <MixedGrid
++                items={mixed.data?.Items ?? []}
++                client={client}
++                loading={mixed.isLoading}
++              />
++            ) : (
++              <>
++                <ResultRow
++                  id="search:movies"
++                  title={t`Movies`}
++                  items={movieItems}
++                  loading={moviesLoading}
++                  client={client}
++                />
++                <ResultRow
++                  id="search:shows"
++                  title={t`Shows`}
++                  items={showItems}
++                  loading={showsLoading}
++                  client={client}
++                />
++              </>
++            )}
++            {!!collectionItems.length && (
++              <ResultRow
++                id="search:collections"
++                title={t`Collections`}
++                items={collectionItems}
++                loading={false}
++                client={client}
++              />
++            )}
++            {!!episodeItems.length && (
++              <ResultRow
++                id="search:episodes"
++                title={t`Episodes`}
++                items={episodeItems}
++                loading={false}
++                client={client}
++              />
++            )}
++            {!peopleFirst && peopleRow}
++            {live && (
++              <ChannelRow
++                items={channelItems}
++                loading={channels.isLoading || channels.isPlaceholderData}
++              />
++            )}
++          </CardPreviewHost>
++        </div>
++      )}
++      {searching && !loading && !found && (
++        <p className="text-[--muted]">
++          <Trans>Nothing found for “{query}”.</Trans>
++        </p>
++      )}
++    </>
++  );
++
++  // tvOS's own search keyboard, in the page's place, with chips for the history and the suggestions.
++  if (appleTv())
++    return (
++      <PageBody>
++        <AppleTvSearch
++          field={
++            <TextInput
++              type="search"
++              autoComplete="off"
++              value={term}
++              onValueChange={setTerm}
++              aria-label={t`Movies, shows and people`}
++              placeholder={t`Movies, shows and people`}
++              data-ui="search-input"
++            />
++          }
++          chips={
++            hints.length > 0 ? (
++              <Chips>
++                {hints.map((hint) => (
++                  <Chip
++                    key={hint.Id}
++                    data-ui="search-suggestion"
++                    icon={<BiSearch />}
++                    label={hint.Name ?? ''}
++                    onClick={() => choose(hint.Name ?? '')}
++                  />
++                ))}
++              </Chips>
++            ) : (
++              !typed &&
++              history.terms.length > 0 && (
++                <Chips>
++                  {history.terms.map((term) => (
++                    // Held Select removes one, as the list's does.
++                    <ContextMenu key={term}>
++                      <ContextMenuTrigger asChild>
++                        <Chip
++                          data-ui="search-history-item"
++                          icon={<BiHistory />}
++                          label={term}
++                          onClick={() => choose(term)}
++                        />
++                      </ContextMenuTrigger>
++                      <ContextMenuContent data-ui="search-history-menu">
++                        <ContextMenuItem onClick={() => history.remove(term)}>
++                          <BiX />
++                          <Trans>Remove</Trans>
++                        </ContextMenuItem>
++                      </ContextMenuContent>
++                    </ContextMenu>
++                  ))}
++                  <Chip
++                    data-ui="search-history-clear"
++                    label={t`Clear all`}
++                    outlined
++                    onClick={history.clear}
++                  />
++                </Chips>
++              )
++            )
++          }
++          results={resultsBlock}
++        />
++      </PageBody>
++    );
++
+   return (
+     <PageBody>
+       <h1 data-ui="page-title" className="text-3xl font-bold">
+@@ -246,77 +386,95 @@ export function SearchPage({ initialTerm }: { initialTerm: string }) {
+           </ul>
+         </section>
+       )}
+-      {searching && (
+-        <div
+-          data-ui="search-results"
+-          className="space-y-8"
+-          onClickCapture={(e) => {
+-            if ((e.target as HTMLElement).closest('a')) history.add(query);
+-          }}
+-        >
+-          <CardPreviewHost>
+-            {peopleFirst && peopleRow}
+-            {combine ? (
+-              <MixedGrid
+-                items={mixed.data?.Items ?? []}
+-                client={client}
+-                loading={mixed.isLoading}
+-              />
+-            ) : (
+-              <>
+-                <ResultRow
+-                  id="search:movies"
+-                  title={t`Movies`}
+-                  items={movieItems}
+-                  loading={moviesLoading}
+-                  client={client}
+-                />
+-                <ResultRow
+-                  id="search:shows"
+-                  title={t`Shows`}
+-                  items={showItems}
+-                  loading={showsLoading}
+-                  client={client}
+-                />
+-              </>
+-            )}
+-            {!!collectionItems.length && (
+-              <ResultRow
+-                id="search:collections"
+-                title={t`Collections`}
+-                items={collectionItems}
+-                loading={false}
+-                client={client}
+-              />
+-            )}
+-            {!!episodeItems.length && (
+-              <ResultRow
+-                id="search:episodes"
+-                title={t`Episodes`}
+-                items={episodeItems}
+-                loading={false}
+-                client={client}
+-              />
+-            )}
+-            {!peopleFirst && peopleRow}
+-            {live && (
+-              <ChannelRow
+-                items={channelItems}
+-                loading={channels.isLoading || channels.isPlaceholderData}
+-              />
+-            )}
+-          </CardPreviewHost>
+-        </div>
+-      )}
+-      {searching && !loading && !found && (
+-        <p className="text-[--muted]">
+-          <Trans>Nothing found for “{query}”.</Trans>
+-        </p>
+-      )}
++      {resultsBlock}
+     </PageBody>
+   );
+ }
+ 
++/**
++ * The Apple TV app's Search page, laid out around tvOS's own search keyboard, which the app shows
++ * in the page's place (AIOStreamsTVOS): the linear keyboard across the top, the grid one down the
++ * left, with the field and "Hold to dictate" above either, as tvOS's own search screen has them.
++ * The page leaves the keyboard's space empty but for one focus target (`tvos-search-keys`), which
++ * hands the remote to the keyboard as focus reaches it, and draws the history and the server's
++ * suggestions as a row of chips, then the results, in the space tvOS gives its results
++ * (`--tvos-results-x`, `--tvos-results-y`, which the bridge script sets from the app's measure).
++ * Its own field stays, unseen, for the keyboard to type into.
++ */
++function AppleTvSearch({
++  field,
++  chips,
++  results,
++}: {
++  field: React.ReactNode;
++  chips: React.ReactNode;
++  results: React.ReactNode;
++}) {
++  return (
++    <div
++      data-ui="search-page"
++      // The page's own height below its top, so only the results scroll, under the keyboard's space.
++      className="relative -mb-16 h-[calc(100dvh-var(--tvos-search-top,6rem))]"
++    >
++      <div className="hidden">{field}</div>
++      <button
++        type="button"
++        data-ui="tvos-search-keys"
++        data-focus="own"
++        aria-label={t`Search`}
++        className="absolute start-0 top-0 h-[var(--tvos-results-y,22rem)] w-full outline-none [[data-keys=grid]_&]:h-full [[data-keys=grid]_&]:w-[var(--tvos-results-x,34rem)]"
++      />
++      <div
++        data-ui="search-results-area"
++        className="absolute bottom-0 end-0 start-[var(--tvos-results-x,0px)] top-[var(--tvos-results-y,22rem)] space-y-8 overflow-y-auto pb-16 pt-6"
++      >
++        {chips}
++        {results}
++      </div>
++    </div>
++  );
++}
++
++/** A row of chips: the history's, or the server's suggestions while typing (AIOStreamsTVOS). */
++function Chips({ children }: { children: React.ReactNode }) {
++  return (
++    <div
++      data-ui="search-chips"
++      data-nav-row=""
++      className="flex flex-wrap items-center gap-3"
++    >
++      {children}
++    </div>
++  );
++}
++
++const Chip = React.forwardRef<
++  HTMLButtonElement,
++  React.ButtonHTMLAttributes<HTMLButtonElement> & {
++    icon?: React.ReactElement<{ className?: string }>;
++    label: string;
++    outlined?: boolean;
++  }
++>(function Chip({ icon, label, outlined, className, ...props }, ref) {
++  return (
++    <button
++      ref={ref}
++      type="button"
++      data-focus="own"
++      className={cn(
++        'flex max-w-xs items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors focus-visible:bg-white focus-visible:text-black focus-visible:outline-none',
++        outlined ? 'ring-2 ring-inset ring-white/60' : 'bg-white/10',
++        className
++      )}
++      {...props}
++    >
++      {icon &&
++        React.cloneElement(icon, { className: 'flex-none text-base opacity-80' })}
++      <span className="truncate">{label}</span>
++    </button>
++  );
++});
++
+ function ChannelRow({
+   items,
+   loading,

@@ -562,7 +562,8 @@ private final class BelowKeyboard: UIViewController {
     }
 }
 
-private final class FocusTrap: UIView {
+/// One focus target that reports focus reaching it; also around the Search page's keyboard (`SearchScreen`).
+final class FocusTrap: UIView {
     var reached: () -> Void = {}
     var armed = false
 

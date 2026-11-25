@@ -1615,27 +1615,106 @@ enum BridgeScript {
       if (tries < SEARCH_FIELD_TRIES) setTimeout(() => openSearchKeyboard(tries + 1), SEARCH_FIELD_WAIT);
       return;
     }
+    // The page laid out around tvOS's own keyboard (patches/web/0105): the keyboard in its place, kept
+    // there while the page shows, rather than over the page.
+    const root = el.closest('[data-ui="search-page"]');
+    if (root) return openSearchScreen(el, root);
     if (el === searchOpened || editing || el.value) return;
     searchOpened = el;
     openKeyboard(el);
   };
+
+  /*
+   * The Search page as tvOS's own search screen (patches/web/0105): the app shows tvOS's search keyboard
+   * in the page's place, the linear one across its top or the grid one down its left, and the page draws
+   * its chips and results in the space tvOS gives its results. Focus moves between them as on tvOS: off
+   * the keys (`fromKeys`) into the page, and back as it reaches the keyboard's space in the page
+   * (`[data-ui="tvos-search-keys"]`), which tells the app to give the keyboard the remote. What's typed goes
+   * into the page's field as with the keyboard over the page (`input`); a term the page puts there itself, a
+   * chip's, goes back to the keyboard (`tvos-search-text`).
+   */
+  let searchScreen = null;
+  /** Focus is on its way out of the keyboard's space, so reaching it doesn't give the keyboard the remote. */
+  let leavingKeys = false;
+  const KEYS = '[data-ui="tvos-search-keys"]';
+  const searchRect = (root) => {
+    const r = root.getBoundingClientRect();
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  };
+  const openSearchScreen = (el, root) => {
+    if (searchScreen && searchScreen.el === el && searchScreen.root === root) return;
+    const reopened = !!searchScreen;
+    closeSearchScreen(false);
+    editing = el;
+    // The page's own height below its top, so only its results scroll.
+    root.style.setProperty('--tvos-search-top', `${root.getBoundingClientRect().top + scrollY}px`);
+    searchScreen = { el, root, value: el.value || '', watch: 0 };
+    send({
+      type: 'tvos-search-screen',
+      open: true,
+      value: el.value || '',
+      label: el.getAttribute('aria-label') || el.placeholder || '',
+      rect: searchRect(root),
+      pageWidth: window.innerWidth,
+      // Back to a search's results (its term in the address) stays on the results, as tvOS's does.
+      focusKeys: !el.value && !reopened,
+    });
+    // Its place once the page has settled, which its first frame may not have.
+    setTimeout(() => {
+      if (searchScreen?.root !== root || !root.isConnected) return;
+      send({ type: 'tvos-search-screen', open: true, rect: searchRect(root), pageWidth: window.innerWidth });
+    }, 300);
+    // A term the page sets itself, a chip's, onto the keyboard's field.
+    searchScreen.watch = setInterval(() => {
+      const open = searchScreen;
+      if (!open) return;
+      if (!open.el.isConnected || !open.root.isConnected) return closeSearchScreen(true);
+      if (open.el.value === open.value) return;
+      open.value = open.el.value;
+      send({ type: 'tvos-search-text', value: open.value });
+    }, 200);
+  };
+  const closeSearchScreen = (tell) => {
+    const open = searchScreen;
+    if (!open) return;
+    searchScreen = null;
+    clearInterval(open.watch);
+    if (editing === open.el) editing = null;
+    if (tell) send({ type: 'tvos-search-screen', open: false });
+  };
+  // Leaving the Search page takes the keyboard with it.
+  const leftSearch = () => {
+    if (searchScreen && location.hash.slice(1).split('?')[0] !== '/search') closeSearchScreen(true);
+  };
+  document.addEventListener(
+    'focusin',
+    (e) => {
+      if (!searchScreen || leavingKeys) return;
+      if (e.target instanceof Element && e.target.matches(KEYS)) send({ type: 'tvos-search-keys' });
+    },
+    true
+  );
   /*
    * The page's router (TanStack's hash history) moves between pages with history.pushState and
    * replaceState, which fire no hashchange, so opening Search from the navigation never reached
    * this. Both are wrapped here, at document start, before the router wraps them in turn; Back
    * and Forward come as popstate. Checked after the call, once the address has changed.
    */
+  const routed = () => {
+    leftSearch();
+    openSearchKeyboard();
+  };
   for (const name of ['pushState', 'replaceState']) {
     const original = history[name];
     history[name] = function (...args) {
       const result = original.apply(this, args);
-      setTimeout(() => openSearchKeyboard());
+      setTimeout(routed);
       return result;
     };
   }
-  window.addEventListener('popstate', () => openSearchKeyboard());
-  window.addEventListener('hashchange', () => openSearchKeyboard());
-  window.addEventListener('load', () => openSearchKeyboard());
+  window.addEventListener('popstate', routed);
+  window.addEventListener('hashchange', routed);
+  window.addEventListener('load', routed);
 
   Object.defineProperty(window, '__aioTV', {
     value: Object.freeze({
@@ -1708,6 +1787,37 @@ enum BridgeScript {
       input(value) {
         const el = editing;
         if (el && el.isConnected) setValue(el, value);
+        if (searchScreen && searchScreen.el === el) searchScreen.value = value;
+      },
+      /**
+       * Focus left the Search page's keyboard (patches/web/0105) that way: on into the page from the
+       * keyboard's space, as an arrow from there takes it; toward the navigation, into it, where the
+       * page found nothing that way. With nowhere to go, the keyboard has the remote again.
+       */
+      fromKeys(name) {
+        const open = searchScreen;
+        const keys = open && open.root.querySelector(KEYS);
+        if (!keys) return;
+        leavingKeys = true;
+        keys.focus({ preventScroll: true });
+        key('keydown', name, false);
+        key('keyup', name);
+        setTimeout(() => {
+          leavingKeys = false;
+          if (document.activeElement !== keys) return;
+          const nav = name === TOWARD_NAV() ? navEntry() : null;
+          if (nav) return focusNav(nav);
+          send({ type: 'tvos-search-keys' });
+        }, 60);
+      },
+      /** Where tvOS lays out the Search page's results, in points from the page's corner, for the page's layout. */
+      searchResults(kind, x, y, webWidth) {
+        const open = searchScreen;
+        if (!open || !(webWidth > 0)) return;
+        const px = (points) => `${Math.max(0, points) * (window.innerWidth / webWidth)}px`;
+        open.root.dataset.keys = kind;
+        open.root.style.setProperty('--tvos-results-x', px(x));
+        open.root.style.setProperty('--tvos-results-y', px(y));
       },
       /** The app's keyboard closed; with `submit`, the field's form is sent. */
       done(submit) {

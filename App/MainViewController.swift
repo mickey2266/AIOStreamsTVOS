@@ -318,10 +318,119 @@ final class MainViewController: UIViewController, RemoteReceiver {
 
     // MARK: Remote
 
-    var takesRemote: Bool { presentedViewController == nil && web?.available == true }
+    /// The page has the remote, unless something is over it or the Search page's keyboard has it (`SearchScreen`).
+    var takesRemote: Bool { presentedViewController == nil && web?.available == true && !searchKeysActive }
+
+    /// With the Search page's keyboard on its keys, Menu and Play/Pause still go through the page: Back as Back,
+    /// a held Play/Pause for the app menu.
+    func claims(_ press: UIPress) -> Bool {
+        searchKeysActive && presentedViewController == nil && (press.type == .menu || press.type == .playPause)
+    }
 
     func remotePress(_ press: UIPress) {
+        // Menu over the Search page's keys hands the remote to the page first, so wherever its Back takes
+        // focus (the navigation, or the page before), the remote follows it there.
+        if searchKeysActive, press.type == .menu, press.phase == .began {
+            searchKeysActive = false
+            web?.focusPage()
+        }
         input.press(press)
+    }
+
+    // MARK: Search page
+
+    /// The Search page's keyboard, in the page's place while the page shows (patches/web/0105).
+    private var searchScreen: SearchScreen?
+    /// Its keys have the remote, rather than the page.
+    private var searchKeysActive = false
+
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        if searchKeysActive, let searchScreen { return [searchScreen.controller] }
+        return super.preferredFocusEnvironments
+    }
+
+    /// The page's `tvos-search-screen`: the Search page showed, moved or went.
+    private func searchScreenMessage(_ message: Message) {
+        guard message.flag("open") == true else { return closeSearchScreen() }
+        guard let web, let rect = message.object("rect") else { return }
+        // The page's measure: the page lays itself out `pageWidth` wide across the web view.
+        let pageWidth = message.number("pageWidth") ?? 0
+        let scale = pageWidth > 0 ? web.bounds.width / CGFloat(pageWidth) : 1
+        func number(_ key: String) -> CGFloat {
+            guard let value = rect.number(key), value.isFinite else { return 0 }
+            return CGFloat(min(max(value, -100_000), 100_000)) * scale
+        }
+        let area = web.convert(CGRect(x: number("x"), y: number("y"), width: number("width"), height: number("height")),
+                               to: view).intersection(view.bounds)
+        guard !area.isNull, area.width > 200, area.height > 200 else { return }
+        if searchScreen == nil {
+            guard presentedViewController == nil else { return }
+            let screen = SearchScreen(
+                text: message.text("value") ?? "",
+                prompt: message.text("label") ?? "",
+                onChange: { [weak self] text in
+                    guard let self else { return }
+                    self.callTV("input(\(self.jsString(text)))")
+                }
+            )
+            screen.left = { [weak self] key in self?.searchKeysLeft(key) }
+            screen.resultsMoved = { [weak self] grid, results in self?.searchResultsMoved(grid: grid, results) }
+            addChild(screen.controller)
+            view.insertSubview(screen.controller.view, aboveSubview: web)
+            screen.controller.didMove(toParent: self)
+            searchScreen = screen
+            // Laid out for where the results were last time, before tvOS has said where they are now.
+            if let last = SearchScreen.rememberedArea {
+                callTV("searchResults(\(jsString(screen.grid ? "grid" : "linear")),\(last.x),\(last.y),\(web.bounds.width))")
+            }
+        } else if let value = message.text("value") {
+            searchScreen?.setText(value)
+        }
+        guard let searchScreen else { return }
+        if searchScreen.controller.view.frame != area {
+            searchScreen.controller.view.frame = area
+            searchScreen.placeTraps(in: view, around: area)
+        }
+        if message.flag("focusKeys") == true { giveSearchKeys() }
+    }
+
+    /// Focus reached the keyboard's space in the page: the keys take the remote, as on tvOS's search screen.
+    private func giveSearchKeys() {
+        guard searchScreen != nil, presentedViewController == nil else { return }
+        guard !searchKeysActive else { return }
+        input.interrupt()
+        searchKeysActive = true
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+    }
+
+    /// Focus went off the keys that way: the page takes the remote, and its focus goes on from the keyboard's space.
+    private func searchKeysLeft(_ key: String) {
+        guard searchKeysActive else { return }
+        searchKeysActive = false
+        // The page is first responder again, so it takes the focus it's given.
+        web?.focusPage()
+        callTV("fromKeys(\(jsString(key)))")
+    }
+
+    /// Where tvOS keeps the results, from the page's corner, for the page to lay its chips and results out in.
+    private func searchResultsMoved(grid: Bool, _ results: CGRect) {
+        guard let web, let searchScreen else { return }
+        let corner = searchScreen.controller.view.frame.origin
+        let inView = view.convert(results, from: nil)
+        callTV("searchResults(\(jsString(grid ? "grid" : "linear")),\(inView.minX - corner.x),\(inView.minY - corner.y),\(web.bounds.width))")
+    }
+
+    private func closeSearchScreen() {
+        guard let screen = searchScreen else { return }
+        searchScreen = nil
+        let hadKeys = searchKeysActive
+        searchKeysActive = false
+        screen.removeTraps()
+        screen.controller.willMove(toParent: nil)
+        screen.controller.view.removeFromSuperview()
+        screen.controller.removeFromParent()
+        if hadKeys { web?.focusPage() }
     }
 
     func remoteTouches(_ touches: Set<UITouch>) {
@@ -621,7 +730,8 @@ final class MainViewController: UIViewController, RemoteReceiver {
         case "hello":
             connected = true
             status.isHidden = true
-            // A page that loaded again knows nothing of a frame the last one set.
+            // A page that loaded again knows nothing of a frame the last one set, or of its Search page's keyboard.
+            closeSearchScreen()
             stage.place(nil)
             backdrop.reset()
             view.backgroundColor = .black
@@ -694,6 +804,12 @@ final class MainViewController: UIViewController, RemoteReceiver {
             TopShelf.publish(message)
         case "tvos-keyboard":
             showKeyboard(message)
+        case "tvos-search-screen":
+            searchScreenMessage(message)
+        case "tvos-search-keys":
+            giveSearchKeys()
+        case "tvos-search-text":
+            searchScreen?.setText(message.text("value") ?? "")
         case "tvos-language":
             // The page's language, which the app's own screens follow (LinkScreen).
             if let language = message.text("language"), !language.isEmpty {
