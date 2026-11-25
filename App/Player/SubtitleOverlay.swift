@@ -605,17 +605,28 @@ final class SubtitleOverlay: UIView {
             outline.alpha = cue.outlineAlpha
             return outline
         }
-        let maxWidth = rect.width - 2 * margin
+        // Wrapped lines leave this much room on both sides, so a line's background never touches the edge.
+        let boxed = look?.box == true ? look.flatMap({ Self.parseColor($0.backColor) }) : nil
+        let pad: CGFloat = boxed != nil ? Self.linePadding * Self.fontUnits * CGFloat(look?.scale ?? 1) * unit : 0
+        let maxWidth = rect.width - 2 * margin - 2 * pad
         var size = label.sizeThatFits(CGSize(width: maxWidth, height: .greatestFiniteMagnitude))
         size.width = min(size.width, maxWidth)
 
+        // The cue's place on the screen; with a background, a box behind each of its lines, as the official
+        // Android app's ExoPlayer draws one (`CaptionStyleCompat`'s background colour, `SubtitlePainter`), rather
+        // than one block as wide as the widest line behind them all.
         let box = UIView()
-        let pad: CGFloat = look?.box == true ? 0.25 * Self.fontUnits * CGFloat(look?.scale ?? 1) * unit : 0
-        if look?.box == true, let back = look.flatMap({ Self.parseColor($0.backColor) }) {
-            box.backgroundColor = back
-            box.layer.cornerRadius = pad / 2
+        let boxSize = CGSize(width: size.width + 2 * pad, height: size.height)
+        if let boxed {
+            for line in Self.lineRects(of: label.attributedText, width: size.width) {
+                // The label sits `pad` in, so a line's box starts at its text's own x.
+                let back = UIView(frame: CGRect(
+                    x: line.minX, y: line.minY, width: line.width + 2 * pad, height: line.height))
+                back.backgroundColor = boxed
+                back.layer.cornerRadius = Self.lineCornerRadius
+                box.addSubview(back)
+            }
         }
-        let boxSize = CGSize(width: size.width + 2 * pad, height: size.height + pad)
 
         var origin = CGPoint.zero
         switch column {
@@ -643,7 +654,7 @@ final class SubtitleOverlay: UIView {
             }
         }
         box.frame = CGRect(origin: origin, size: boxSize)
-        let labelFrame = CGRect(x: pad, y: pad / 2, width: size.width, height: size.height)
+        let labelFrame = CGRect(x: pad, y: 0, width: size.width, height: size.height)
         if let outlineLabel {
             // Larger than the text by the outline's reach, so the outline isn't cut at the edges.
             outlineLabel.frame = labelFrame.insetBy(dx: -cue.outlineRadius, dy: -cue.outlineRadius)
@@ -652,6 +663,47 @@ final class SubtitleOverlay: UIView {
         label.frame = labelFrame
         box.addSubview(label)
         addSubview(box)
+    }
+
+    /// A line's background reaches past its text by this share of the font size on each side, as ExoPlayer's
+    /// (`SubtitlePainter`'s `INNER_PADDING_RATIO`); above and below, the line's own height.
+    private static let linePadding: CGFloat = 0.125
+    /// ExoPlayer's corner radius, 2 dp.
+    private static let lineCornerRadius: CGFloat = 2
+
+    /**
+     * Where each line of `text` lies when it wraps at `width`, as the label lays it out: TextKit with the
+     * label's wrapping and no padding at the container's edges. Each rect spans its line's height, so the
+     * boxes of consecutive lines meet without overlapping, and its text's width, aligned as the text is.
+     */
+    private static func lineRects(of text: NSAttributedString?, width: CGFloat) -> [CGRect] {
+        guard let text, text.length > 0 else { return [] }
+        let storage = NSTextStorage(attributedString: text)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        container.lineBreakMode = .byWordWrapping
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        var lines: [CGRect] = []
+        let glyphs = layout.glyphRange(for: container)
+        let string = text.string as NSString
+        layout.enumerateLineFragments(forGlyphRange: glyphs) { line, _, _, range, _ in
+            // A wrapped line's trailing space has no ink, so its box stops at the last word.
+            let characters = layout.characterRange(forGlyphRange: range, actualGlyphRange: nil)
+            var end = characters.location + characters.length
+            while end > characters.location,
+                  let scalar = Unicode.Scalar(string.character(at: end - 1)),
+                  CharacterSet.whitespacesAndNewlines.contains(scalar) { end -= 1 }
+            // A blank line has nothing to put behind.
+            guard end > characters.location else { return }
+            let inked = layout.glyphRange(
+                forCharacterRange: NSRange(location: characters.location, length: end - characters.location),
+                actualCharacterRange: nil)
+            let ink = layout.boundingRect(forGlyphRange: inked, in: container)
+            lines.append(CGRect(x: ink.minX, y: line.minY, width: ink.width, height: line.height))
+        }
+        return lines
     }
 
     /// `#AARRGGBB` or `#RRGGBB`, as mpv reads them.
